@@ -1,5 +1,6 @@
 #!/bin/sh
 
+export USE_CS5=1
 MAKE=make
 gmake --help >/dev/null 2>&1
 [ $? = 0 ] && MAKE=gmake
