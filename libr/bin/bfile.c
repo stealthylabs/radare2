@@ -30,12 +30,15 @@ static ut64 binobj_a2b(RBinObject *o, ut64 addr) {
 	return o ? addr + o->baddr_shift : addr;
 }
 
-static void print_string(RBinFile *bf, RBinString *string, int raw) {
+static void print_string(RBinFile *bf, RBinString *string, int raw, PJ *pj) {
 	r_return_if_fail (bf && string);
 
 	int mode = bf->strmode;
 	ut64 addr, vaddr;
 	RBin *bin = bf->rbin;
+	if (!bin) {
+		return;
+	}
 	const char *section_name, *type_string;
 	RIO *io = bin->iob.io;
 	if (!io) {
@@ -54,13 +57,17 @@ static void print_string(RBinFile *bf, RBinString *string, int raw) {
 	switch (mode) {
 	case R_MODE_JSON:
 		{
-			PJ *pj = pj_new ();
 			if (pj) {
 				pj_o (pj);
+				pj_kn (pj, "vaddr", vaddr);
+				pj_kn (pj, "paddr", string->paddr);
+				pj_kn (pj, "ordinal", string->ordinal);
+				pj_kn (pj, "size", string->size);
+				pj_kn (pj, "length", string->length);
+				pj_ks (pj, "section", section_name);
+				pj_ks (pj, "type", type_string);
 				pj_ks (pj, "string", string->string);
 				pj_end (pj);
-				io->cb_printf ("%s\n", pj_string (pj));
-				pj_free (pj);
 			}
 		}
 		break;
@@ -135,6 +142,13 @@ static int string_scan_range(RList *list, RBinFile *bf, int min,
 	st64 vdelta = 0, pdelta = 0;
 	RBinSection *s = NULL;
 	bool ascii_only = false;
+	PJ *pj = NULL;
+	if (bf->strmode == R_MODE_JSON && !list) {
+		pj = pj_new ();
+		if (pj) {
+			pj_a (pj);
+		}
+	}
 	r_buf_read_at (bf->buf, from, buf, len);
 	// may oobread
 	while (needle < to) {
@@ -326,7 +340,7 @@ static int string_scan_range(RList *list, RBinFile *bf, int min,
 					ht_up_insert (bf->o->strings_db, bs->vaddr, bs);
 				}
 			} else {
-				print_string (bf, bs, raw);
+				print_string (bf, bs, raw, pj);
 				r_bin_string_free (bs);
 			}
 			if (from == 0 && to == bf->size) {
@@ -337,6 +351,14 @@ static int string_scan_range(RList *list, RBinFile *bf, int min,
 		ascii_only = false;
 	}
 	free (buf);
+	if (pj) {
+		pj_end (pj);
+		RIO *io = bin->iob.io;
+		if (io) {
+			io->cb_printf ("%s", pj_string (pj));
+		}
+		pj_free (pj);
+	}
 	return count;
 }
 
@@ -473,10 +495,10 @@ static bool xtr_metadata_match(RBinXtrData *xtr_data, const char *arch, int bits
 	return bits == iter_bits && !strcmp (iter_arch, arch) && !xtr_data->loaded;
 }
 
-R_IPI RBinFile *r_bin_file_new_from_buffer(RBin *bin, const char *file, RBuffer *buf, ut64 file_sz, int rawstr, ut64 baseaddr, ut64 loadaddr, int fd, const char *pluginname, ut64 offset) {
-	r_return_val_if_fail (bin && file && buf && file_sz != UT64_MAX, NULL);
+R_IPI RBinFile *r_bin_file_new_from_buffer(RBin *bin, const char *file, RBuffer *buf, int rawstr, ut64 baseaddr, ut64 loadaddr, int fd, const char *pluginname) {
+	r_return_val_if_fail (bin && file && buf, NULL);
 
-	RBinFile *bf = r_bin_file_new (bin, file, file_sz, rawstr, fd, pluginname, NULL, false);
+	RBinFile *bf = r_bin_file_new (bin, file, r_buf_size (buf), rawstr, fd, pluginname, NULL, false);
 	if (bf) {
 		bf->buf = r_buf_ref (buf);
 		RBinPlugin *plugin = get_plugin_from_buffer (bin, pluginname, bf->buf);
@@ -488,7 +510,7 @@ R_IPI RBinFile *r_bin_file_new_from_buffer(RBin *bin, const char *file, RBuffer 
 		// size is set here because the reported size of the object depends on
 		// if loaded from xtr plugin or partially read
 		if (!o->size) {
-			o->size = file_sz;
+			o->size = r_buf_size (buf);
 		}
 		r_list_append (bin->binfiles, bf);
 	}
@@ -542,19 +564,20 @@ R_API ut64 r_bin_file_delete_all(RBin *bin) {
 	return 0;
 }
 
-R_API bool r_bin_file_delete(RBin *bin, ut32 bin_fd) {
+R_API bool r_bin_file_delete(RBin *bin, ut32 bin_id) {
+	r_return_val_if_fail (bin, false);
+
 	RListIter *iter;
-	RBinFile *bf = r_bin_cur (bin);
-	if (bin && bf) {
-		r_list_foreach (bin->binfiles, iter, bf) {
-			if (bf && bf->fd == bin_fd) {
-				if (bf->fd == bin_fd) {
-					//avoiding UaF due to dead reference
-					bin->cur = NULL;
-				}
-				r_list_delete (bin->binfiles, iter);
-				return true;
+	RBinFile *bf, *cur = r_bin_cur (bin);
+
+	r_list_foreach (bin->binfiles, iter, bf) {
+		if (bf && bf->id == bin_id) {
+			if (cur && cur->id == bin_id) {
+				// avoiding UaF due to dead reference
+				bin->cur = NULL;
 			}
+			r_list_delete (bin->binfiles, iter);
+			return true;
 		}
 	}
 	return false;
@@ -695,12 +718,12 @@ R_API void r_bin_file_free(void /*RBinFile*/ *_bf) {
 	free (bf);
 }
 
-R_IPI RBinFile *r_bin_file_xtr_load_buffer(RBin *bin, RBinXtrPlugin *xtr, const char *filename, RBuffer *buf, ut64 file_sz, ut64 baseaddr, ut64 loadaddr, int idx, int fd, int rawstr) {
+R_IPI RBinFile *r_bin_file_xtr_load_buffer(RBin *bin, RBinXtrPlugin *xtr, const char *filename, RBuffer *buf, ut64 baseaddr, ut64 loadaddr, int idx, int fd, int rawstr) {
 	r_return_val_if_fail (bin && xtr && buf, NULL);
 
 	RBinFile *bf = r_bin_file_find_by_name (bin, filename);
 	if (!bf) {
-		bf = r_bin_file_new (bin, filename, file_sz, rawstr, fd, xtr->name, bin->sdb, false);
+		bf = r_bin_file_new (bin, filename, r_buf_size (buf), rawstr, fd, xtr->name, bin->sdb, false);
 		if (!bf) {
 			return NULL;
 		}
@@ -881,12 +904,13 @@ R_API bool r_bin_file_hash(RBin *bin, ut64 limit, const char *file, RList/*<RBin
 		}
 		o->info->file_hashes = NULL;
 	}
-	ctx = r_hash_new (false, R_HASH_MD5 | R_HASH_SHA1);
+	ctx = r_hash_new (false, R_HASH_MD5 | R_HASH_SHA1 | R_HASH_SHA256);
 	while (r + blocksize < buf_len) {
 		r_io_desc_seek (iod, r, R_IO_SEEK_SET);
 		int b = r_io_desc_read (iod, buf, blocksize);
 		(void)r_hash_do_md5 (ctx, buf, blocksize);
 		(void)r_hash_do_sha1 (ctx, buf, blocksize);
+		(void)r_hash_do_sha256 (ctx, buf, blocksize);
 		r += b;
 	}
 	if (r < buf_len) {
@@ -898,6 +922,7 @@ R_API bool r_bin_file_hash(RBin *bin, ut64 limit, const char *file, RList/*<RBin
 		} else {
 			(void)r_hash_do_md5 (ctx, buf, b);
 			(void)r_hash_do_sha1 (ctx, buf, b);
+			(void)r_hash_do_sha256 (ctx, buf, b);
 		}
 	}
 	r_hash_do_end (ctx, R_HASH_MD5);
@@ -918,6 +943,15 @@ R_API bool r_bin_file_hash(RBin *bin, ut64 limit, const char *file, RList/*<RBin
 		sha1h->type = strdup ("sha1");
 		sha1h->hex = strdup (hash);
 		r_list_push (o->info->file_hashes, sha1h);
+	}
+	r_hash_do_end (ctx, R_HASH_SHA256);
+	r_hex_bin2str (ctx->digest, R_HASH_SIZE_SHA256, hash);
+
+	RBinFileHash *sha256h = R_NEW0 (RBinFileHash);
+	if (sha256h) {
+		sha256h->type = strdup ("sha256");
+		sha256h->hex = strdup (hash);
+		r_list_push (o->info->file_hashes, sha256h);
 	}
 	// TODO: add here more rows
 

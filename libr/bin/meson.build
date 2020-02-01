@@ -28,6 +28,7 @@ r_bin_sources = [
   'p/bin_fs.c',
   'p/bin_java.c',
   'p/bin_ldr_linux.c',
+  'p/bin_le.c',
   'p/bin_mach0.c',
   'p/bin_mach064.c',
   'p/bin_mbn.c',
@@ -47,6 +48,7 @@ r_bin_sources = [
   'p/bin_pe.c',
   'p/bin_pe64.c',
   'p/bin_pebble.c',
+  'p/bin_prg.c',
   'p/bin_psxexe.c',
   'p/bin_qnx.c',
   'p/bin_sfc.c',
@@ -67,6 +69,7 @@ r_bin_sources = [
   'p/bin_xtr_dyldcache.c',
   'p/bin_xtr_fatmach0.c',
   'p/bin_xtr_pemixed.c',
+  'p/bin_xtr_sep64.c',
   'p/bin_z64.c',
   'p/bin_zimg.c',
 
@@ -87,6 +90,7 @@ r_bin_sources = [
   'format/mdmp/mdmp.c',
   'format/mdmp/mdmp_pe.c',
   'format/mdmp/mdmp_pe64.c',
+  'format/le/le.c',
   'format/ne/ne.c',
   'format/mz/mz.c',
   'format/nxo/nxo.c',
@@ -129,7 +133,7 @@ r_bin_inc = [platform_inc, include_directories('mangling', 'format')]
 
 r_bin = library('r_bin', r_bin_sources,
   include_directories: r_bin_inc,
-  c_args: ['-DR_API_BIN_ONLY=1'] + library_cflags,
+  c_args: ['-DR_API_BIN_ONLY=1'] + library_cflags + ['-DR_BIN_SRC=1'],
   dependencies: [
     r_util_dep,
     r_io_dep,
@@ -137,7 +141,6 @@ r_bin = library('r_bin', r_bin_sources,
     r_magic_dep,
     r_socket_dep,
     r_syscall_dep,
-    sdb_dep,
     java_dep,
     lz4_dep
   ],

@@ -6,9 +6,18 @@ pkgconfig_mod = import('pkgconfig')
 
 # Get r2 version
 r2_version = 'unknown-error'
-r = run_command(py3_exe, 'sys/version.py')
+r2_version_major = 0
+r2_version_minor = 0
+r2_version_patch = 0
+r2_version_number = 0
+r = run_command(py3_exe, 'sys/version.py', '--full-version')
 if r.returncode() == 0
-  r2_version = r.stdout().strip()
+  vers = r.stdout().strip().split('\n')
+  r2_version = vers[0]
+  r2_version_major = vers[1]
+  r2_version_minor = vers[2]
+  r2_version_patch = vers[3]
+  r2_version_number = vers[4]
   if host_machine.system() == 'darwin'
     r2_version = r2_version.split('-')[0]
   endif
@@ -334,6 +343,7 @@ userconf.set10('HAVE_FORK', true)
 userconf.set10('HAVE_PTRACE', have_ptrace)
 userconf.set10('USE_PTRACE_WRAP', use_ptrace_wrap)
 userconf.set10('WITH_GPL', true)
+userconf.set10('USE_TREESITTER', get_option('use_treesitter'))
 ok = cc.has_header_symbol('sys/personality.h', 'ADDR_NO_RANDOMIZE')
 userconf.set10('HAVE_DECL_ADDR_NO_RANDOMIZE', ok)
 
@@ -341,7 +351,8 @@ foreach item : [
     ['arc4random_uniform', '#include <stdlib.h>'],
     ['explicit_bzero', '#include <string.h>'],
     ['explicit_memset', '#include <string.h>'],
-    ['clock_nanosleep', '#include <time.h>']
+    ['clock_nanosleep', '#include <time.h>'],
+    ['sigaction', '#include <signal.h>']
   ]
   func = item[0]
   ok = cc.has_function(func, prefix: item[1])
@@ -358,6 +369,10 @@ r_userconf_h = configure_file(
 versionconf = configuration_data()
 versionconf.set('MESON_VERSION', meson.version())
 versionconf.set('VERSIONCOMMIT', version_commit)
+versionconf.set('R2_VERSION_MAJOR', r2_version_major)
+versionconf.set('R2_VERSION_MINOR', r2_version_minor)
+versionconf.set('R2_VERSION_PATCH', r2_version_patch)
+versionconf.set('R2_VERSION_NUMBER', r2_version_number)
 versionconf.set('R2_VERSION', r2_version)
 versionconf.set('R2_GITTAP', gittap)
 versionconf.set('R2_GITTIP', gittip)
@@ -389,10 +404,11 @@ subdir('libr/util')
 subdir('libr/hash')
 subdir('libr/crypto')
 subdir('libr/socket')
+subdir('libr/cons')
+subdir('shlr/gdb')
 subdir('libr/io')
 subdir('libr/bp')
 subdir('libr/syscall')
-subdir('libr/cons')
 subdir('libr/search')
 subdir('libr/magic')
 subdir('libr/flag')

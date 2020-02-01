@@ -12,64 +12,6 @@ void r_sys_perror_str(const char *fun);
 #define ErrorExit(x) { r_sys_perror(x); return false; }
 char *ReadFromPipe(HANDLE fh, int *outlen);
 
-// HACKY
-static char *getexe(const char *str) {
-	char *ptr, *targv, *argv0 = strdup (str);
-	ptr = strchr (argv0, ' ');
-	if (ptr) *ptr = '\0';
-	targv = realloc (argv0, strlen (argv0)+8);
-	if (!targv) {
-		free (argv0);
-		return NULL;
-	}
-	argv0 = targv;
-	strcat (argv0, ".exe");
-	return argv0;
-}
-
-R_API os_info *r_sys_get_winver() {
-	HKEY key;
-	DWORD type;
-	DWORD size;
-	DWORD major;
-	DWORD minor;
-	char release[25];
-	os_info *info = calloc (1, sizeof (os_info));
-	if (!info) {
-		return NULL;
-	}
-	if (RegOpenKeyExA (HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion", 0,
-		KEY_QUERY_VALUE, &key) != ERROR_SUCCESS) {
-		r_sys_perror ("r_sys_get_winver/RegOpenKeyExA");
-		free (info);
-		return 0;
-	}
-	size = sizeof (major);
-	if (RegQueryValueExA (key, "CurrentMajorVersionNumber", NULL, &type,
-		(LPBYTE)&major, &size) != ERROR_SUCCESS
-		|| type != REG_DWORD) {
-		goto beach;
-	}
-	info->major = major;
-	size = sizeof (minor);
-	if (RegQueryValueExA (key, "CurrentMinorVersionNumber", NULL, &type,
-		(LPBYTE)&minor, &size) != ERROR_SUCCESS
-		|| type != REG_DWORD) {
-		goto beach;
-	}
-	info->minor = minor;
-	size = sizeof (release);
-	if (RegQueryValueExA (key, "ReleaseId", NULL, &type,
-		(LPBYTE)release, &size) != ERROR_SUCCESS
-		|| type != REG_SZ) {
-		goto beach;
-	}
-	info->compilation = atoi (release);
-beach:
-	RegCloseKey (key);
-	return info;
-}
-
 R_API char *r_sys_get_src_dir_w32() {
 	TCHAR fullpath[MAX_PATH + 1];
 	TCHAR shortpath[MAX_PATH + 1];

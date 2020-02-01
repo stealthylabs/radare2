@@ -137,19 +137,19 @@ R_API int r_anal_op(RAnal *anal, RAnalOp *op, ut64 addr, const ut8 *data, int le
 	r_anal_op_init (op);
 	r_return_val_if_fail (anal && op && len > 0, -1);
 
-	if (anal->pcalign && addr % anal->pcalign) {
-		op->type = R_ANAL_OP_TYPE_ILL;
-		op->addr = addr;
-		// eprintf ("Unaligned instruction for %d bits at 0x%"PFMT64x"\n", anal->bits, addr);
-		op->size = 1;
-		return -1;
-	}
 	int ret = R_MIN (2, len);
 	if (len > 0 && anal->cur && anal->cur->op) {
 		//use core binding to set asm.bits correctly based on the addr
 		//this is because of the hassle of arm/thumb
 		if (anal && anal->coreb.archbits) {
 			anal->coreb.archbits (anal->coreb.core, addr);
+		}
+		if (anal->pcalign && addr % anal->pcalign) {
+			op->type = R_ANAL_OP_TYPE_ILL;
+			op->addr = addr;
+			// eprintf ("Unaligned instruction for %d bits at 0x%"PFMT64x"\n", anal->bits, addr);
+			op->size = 1;
+			return -1;
 		}
 		ret = anal->cur->op (anal, op, addr, data, len, mask);
 		if (ret < 1) {
@@ -176,6 +176,11 @@ R_API int r_anal_op(RAnal *anal, RAnalOp *op, ut64 addr, const ut8 *data, int le
 			op->cycles = defaultCycles (op);
 		}
 	}
+	if (!op->mnemonic && (mask & R_ANAL_OP_MASK_DISASM)) {
+		if (anal->verbose) {
+			eprintf ("Warning: unhandled R_ANAL_OP_MASK_DISASM in r_anal_op\n");
+		}
+        }
 	if (mask & R_ANAL_OP_MASK_HINT) {
 		RAnalHint *hint = r_anal_hint_get (anal, addr);
 		if (hint) {
@@ -334,23 +339,8 @@ R_API int r_anal_optype_from_string(const char *type) {
 }
 
 R_API const char *r_anal_optype_to_string(int t) {
-	switch (t) {
-	case R_ANAL_OP_TYPE_RPUSH:
-		return "rpush";
-	default:
-		/* nothing */
-		break;
-	}
-	// t &= R_ANAL_OP_TYPE_MASK; // ignore the modifier bits... we don't want this!
-#if 0
-	int i;
-	// this is slower than a switch table :(
-	for  (i = 0; optypes[i].name;i++) {
-		if (optypes[i].type == t) {
-			return optypes[i].name;
-		}
-	}
-#endif
+	bool once = true;
+repeat:
 	// TODO: delete
 	switch (t) {
 	case R_ANAL_OP_TYPE_IO    : return "io";
@@ -382,6 +372,7 @@ R_API const char *r_anal_optype_to_string(int t) {
 	case R_ANAL_OP_TYPE_OR    : return "or";
 	case R_ANAL_OP_TYPE_POP   : return "pop";
 	case R_ANAL_OP_TYPE_PUSH  : return "push";
+	case R_ANAL_OP_TYPE_RPUSH : return "rpush";
 	case R_ANAL_OP_TYPE_REP   : return "rep";
 	case R_ANAL_OP_TYPE_RET   : return "ret";
 	case R_ANAL_OP_TYPE_ROL   : return "rol";
@@ -413,6 +404,11 @@ R_API const char *r_anal_optype_to_string(int t) {
 	case R_ANAL_OP_TYPE_CASE  : return "case";
 	case R_ANAL_OP_TYPE_CPL   : return "cpl";
 	case R_ANAL_OP_TYPE_CRYPTO: return "crypto";
+	}
+	if (once) {
+		once = false;
+		t &= R_ANAL_OP_TYPE_MASK; // ignore the modifier bits... we don't want this!
+		goto repeat;
 	}
 	return "undefined";
 }

@@ -8,9 +8,6 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdarg.h>
-#if __UNIX__
-#include <signal.h>
-#endif
 
 #define COUNT_LINES 1
 #define CTX(x) I.context->x
@@ -139,7 +136,7 @@ static inline void __cons_write_ll(const char *buf, int len) {
 		(void) write (I.fdout, buf, len);
 	} else {
 		if (I.fdout == 1) {
-			r_cons_w32_print ((const ut8*)buf, len, false);
+			r_cons_w32_print (buf, len, false);
 		} else {
 			(void) write (I.fdout, buf, len);
 		}
@@ -293,7 +290,7 @@ R_API void r_cons_context_break_push(RConsContext *context, RConsBreak cb, void 
 	if (r_stack_is_empty (context->break_stack)) {
 #if __UNIX__
 		if (sig && r_cons_context_is_main ()) {
-			signal (SIGINT, __break_signal);
+			r_sys_signal (SIGINT, __break_signal);
 		}
 #endif
 		context->breaked = false;
@@ -322,7 +319,7 @@ R_API void r_cons_context_break_pop(RConsContext *context, bool sig) {
 		//there is not more elements in the stack
 #if __UNIX__
 		if (sig && r_cons_context_is_main ()) {
-			signal (SIGINT, SIG_IGN);
+			r_sys_signal (SIGINT, SIG_IGN);
 		}
 #endif
 		context->breaked = false;
@@ -370,7 +367,8 @@ R_API int r_cons_get_cur_line() {
 #if __UNIX__
 		char buf[8];
 		struct termios save,raw;
-		fflush(stdout);			// flush the Arrow keys escape keys which was messing up the output
+		// flush the Arrow keys escape keys which was messing up the output
+		fflush (stdout);
 		(void) tcgetattr (0, &save);
 		cfmakeraw (&raw);
 		(void) tcsetattr (0, TCSANOW, &raw);
@@ -389,27 +387,20 @@ R_API int r_cons_get_cur_line() {
 }
 
 R_API void r_cons_break_timeout(int timeout) {
-	if (!timeout && I.timeout) {
-		I.timeout = 0;
-	} else {
-		if (timeout) {
-			I.timeout = r_sys_now () + (timeout * 1000000);
-		} else {
-			I.timeout = 0;
-		}
-	}
+	I.timeout = (timeout && !I.timeout) 
+		? r_sys_now () + ((ut64) timeout << 20) : 0;
 }
 
 R_API void r_cons_break_end() {
 	I.context->breaked = false;
 	I.timeout = 0;
 #if __UNIX__
-	signal (SIGINT, SIG_IGN);
+	r_sys_signal (SIGINT, SIG_IGN);
 #endif
 	if (!r_stack_is_empty (I.context->break_stack)) {
-		//free all the stack
+		// free all the stack
 		r_stack_free (I.context->break_stack);
-		//create another one
+		// create another one
 		I.context->break_stack = r_stack_newf (6, break_stack_free);
 		I.context->event_interrupt_data = NULL;
 		I.context->event_interrupt = NULL;
@@ -424,10 +415,9 @@ R_API void *r_cons_sleep_begin(void) {
 }
 
 R_API void r_cons_sleep_end(void *user) {
-	if (!I.cb_sleep_end) {
-		return;
+	if (I.cb_sleep_end) {
+		I.cb_sleep_end (I.user, user);
 	}
-	I.cb_sleep_end (I.user, user);
 }
 
 #if __WINDOWS__
@@ -467,7 +457,7 @@ R_API bool r_cons_get_click(int *x, int *y) {
 		*y = I.click_y;
 	}
 	bool set = I.click_set;
-	I.click_set = false;;
+	I.click_set = false;
 	return set;
 }
 
@@ -543,21 +533,6 @@ R_API RCons *r_cons_new() {
 	I.null = 0;
 #if __WINDOWS__
 	I.ansicon = r_cons_is_ansicon ();
-#if UNICODE
-	if (IsValidCodePage (CP_UTF8)) {
-		if (!SetConsoleOutputCP (CP_UTF8) || !SetConsoleCP (CP_UTF8)) {
-			r_sys_perror ("r_cons_new");
-		}
-	} else {
-		R_LOG_WARN ("UTF-8 Codepage not installed.\n");
-	}
-#else
-	UINT CP_IN = GetACP ();
-	UINT CP_OUT = IsValidCodePage (CP_UTF8) ? CP_UTF8 : CP_IN;
-	if (!SetConsoleOutputCP (CP_OUT) || !SetConsoleCP (CP_IN)) {
-		r_sys_perror ("r_cons_new");
-	}
-#endif
 #endif
 #if EMSCRIPTEN
 	/* do nothing here :? */
@@ -569,7 +544,7 @@ R_API RCons *r_cons_new() {
 	I.term_raw.c_cflag &= ~(CSIZE|PARENB);
 	I.term_raw.c_cflag |= CS8;
 	I.term_raw.c_cc[VMIN] = 1; // Solaris stuff hehe
-	signal (SIGWINCH, resize);
+	r_sys_signal (SIGWINCH, resize);
 #elif __WINDOWS__
 	h = GetStdHandle (STD_INPUT_HANDLE);
 	GetConsoleMode (h, &I.term_buf);
@@ -580,6 +555,7 @@ R_API RCons *r_cons_new() {
 #endif
 	I.pager = NULL; /* no pager by default */
 	I.mouse = 0;
+	I.onestream = false;
 	I.show_vals = false;
 	r_cons_reset ();
 	r_cons_rgb_init ();
@@ -985,7 +961,7 @@ R_API void r_cons_visual_flush() {
 		if (I.ansicon) {
 			r_cons_visual_write (I.context->buffer);
 		} else {
-			r_cons_w32_print ((const ut8*)I.context->buffer, I.context->buffer_len, true);
+			r_cons_w32_print (I.context->buffer, I.context->buffer_len, true);
 		}
 #else
 		r_cons_visual_write (I.context->buffer);
@@ -1156,6 +1132,24 @@ R_API int r_cons_printf(const char *format, ...) {
 	return 0;
 }
 
+#if ONE_STREAM_HACK
+R_API int r_cons_onestream_printf(const char *format, ...) {
+	va_list ap;
+	if (!format || !*format) {
+		return -1;
+	}
+	va_start (ap, format);
+	if (I.onestream) {
+		r_cons_printf_list (format, ap);
+	} else {
+		vfprintf (stderr, format, ap);
+	}
+	va_end (ap);
+
+	return 0;
+}
+#endif
+
 R_API int r_cons_get_column() {
 	char *line = strrchr (I.context->buffer, '\n');
 	if (!line) {
@@ -1300,7 +1294,7 @@ R_API int r_cons_get_size(int *rows) {
 	bool ret = GetConsoleScreenBufferInfo (GetStdHandle (STD_OUTPUT_HANDLE), &csbi);
 	I.columns = csbi.srWindow.Right - csbi.srWindow.Left + 1;
 	I.rows = csbi.srWindow.Bottom - csbi.srWindow.Top + 1;
- 	if (!ret || I.columns == -1 && I.rows == 0) {
+ 	if (!ret || (I.columns == -1 && I.rows == 0)) {
 		// Stdout is probably redirected so we set default values
 		I.columns = 80;
 		I.rows = 23;
@@ -1375,22 +1369,27 @@ R_API int r_cons_get_size(int *rows) {
 }
 
 #if __WINDOWS__
-R_API os_info *r_sys_get_osinfo();
 R_API bool r_cons_is_ansicon(void) {
 	DWORD major;
 	DWORD minor;
+	DWORD release = 0;
 	bool win_support = false;
-	os_info *info = r_sys_get_osinfo ();
-	if (info) {
-		major = info->major;
-		minor = info->minor;
+	RSysInfo *info = r_sys_info ();
+	if (info && info->version) {
+		char *dot = strtok (info->version, ".");
+		major = atoi (dot);
+		dot = strtok (NULL, ".");
+		minor = atoi (dot);
+		if (info->release) {
+			release = atoi (info->release);
+		}
 		if (major > 10
-			|| major == 10 && minor > 0
-			|| major == 10 && minor == 0 && info->compilation >= 1703) {
+			|| (major == 10 && minor > 0)
+			|| (major == 10 && minor == 0 && release >= 1703)) {
 			win_support = true;
 		}
 	}
-	free (info);
+	r_sys_info_free (info);
 	char *ansicon = r_sys_getenv ("ANSICON");
 	if (ansicon) {
 		free (ansicon);
@@ -1464,6 +1463,34 @@ R_API void r_cons_set_raw(bool is_raw) {
 #endif
 	fflush (stdout);
 	oldraw = is_raw;
+}
+
+R_API void r_cons_set_utf8(bool b) {
+	I.use_utf8 = b;
+#if __WINDOWS__
+	if (b) {
+		if (IsValidCodePage (CP_UTF8)) {
+			if (!SetConsoleOutputCP (CP_UTF8)) {
+				r_sys_perror ("r_cons_set_utf8");
+			}
+#if UNICODE
+			UINT inCP = CP_UTF8;
+#else
+			UINT inCP = GetACP ();
+#endif
+			if (!SetConsoleCP (inCP)) {
+				r_sys_perror ("r_cons_set_utf8");
+			}
+		} else {
+			R_LOG_WARN ("UTF-8 Codepage not installed.\n");
+		}
+	} else {
+		UINT acp = GetACP ();
+		if (!SetConsoleCP (acp) || !SetConsoleOutputCP (acp)) {
+			r_sys_perror ("r_cons_set_utf8");
+		}
+	}
+#endif
 }
 
 R_API void r_cons_invert(int set, int color) {
@@ -1699,24 +1726,24 @@ R_API void r_cons_bind(RConsBind *bind) {
 	bind->get_size = r_cons_get_size;
 	bind->get_cursor = r_cons_get_cursor;
 	bind->cb_printf = r_cons_printf;
+	bind->cb_flush = r_cons_flush;
+	bind->cb_grep = r_cons_grep;
 	bind->is_breaked = r_cons_is_breaked;
 }
 
 R_API const char* r_cons_get_rune(const ut8 ch) {
-	if (ch >= RUNECODE_MIN && ch < RUNECODE_MAX) {
-		switch (ch) {
-		case RUNECODE_LINE_HORIZ: return RUNE_LINE_HORIZ;
-		case RUNECODE_LINE_VERT:  return RUNE_LINE_VERT;
-		case RUNECODE_LINE_CROSS: return RUNE_LINE_CROSS;
-		case RUNECODE_CORNER_TL:  return RUNE_CORNER_TL;
-		case RUNECODE_CORNER_TR:  return RUNE_CORNER_TR;
-		case RUNECODE_CORNER_BR:  return RUNE_CORNER_BR;
-		case RUNECODE_CORNER_BL:  return RUNE_CORNER_BL;
-		case RUNECODE_CURVE_CORNER_TL:  return RUNE_CURVE_CORNER_TL;
-		case RUNECODE_CURVE_CORNER_TR:  return RUNE_CURVE_CORNER_TR;
-		case RUNECODE_CURVE_CORNER_BR:  return RUNE_CURVE_CORNER_BR;
-		case RUNECODE_CURVE_CORNER_BL:  return RUNE_CURVE_CORNER_BL;
-		}
+	switch (ch) {
+	case RUNECODE_LINE_HORIZ: return RUNE_LINE_HORIZ;
+	case RUNECODE_LINE_VERT:  return RUNE_LINE_VERT;
+	case RUNECODE_LINE_CROSS: return RUNE_LINE_CROSS;
+	case RUNECODE_CORNER_TL:  return RUNE_CORNER_TL;
+	case RUNECODE_CORNER_TR:  return RUNE_CORNER_TR;
+	case RUNECODE_CORNER_BR:  return RUNE_CORNER_BR;
+	case RUNECODE_CORNER_BL:  return RUNE_CORNER_BL;
+	case RUNECODE_CURVE_CORNER_TL:  return RUNE_CURVE_CORNER_TL;
+	case RUNECODE_CURVE_CORNER_TR:  return RUNE_CURVE_CORNER_TR;
+	case RUNECODE_CURVE_CORNER_BR:  return RUNE_CURVE_CORNER_BR;
+	case RUNECODE_CURVE_CORNER_BL:  return RUNE_CURVE_CORNER_BL;
 	}
 	return NULL;
 }

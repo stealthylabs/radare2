@@ -2077,9 +2077,11 @@ RList *MACH0_(get_segments)(RBinFile *bf) {
 #else
 				const int ws = 4;
 #endif
-				s->format = r_str_newf ("Cd %d[%d]", ws, s->vsize / ws);
+				s->format = r_str_newf ("Cd %d[%"PFMT64d"]", ws, s->vsize / ws);
 			}
 			r_list_append (list, s);
+			free (segment_name);
+			free (section_name);
 		}
 	}
 	return list;
@@ -2170,6 +2172,7 @@ static bool parse_import_stub(struct MACH0_(obj_t) *bin, struct symbol_t *symbol
 	symbol->offset = 0LL;
 	symbol->addr = 0LL;
 	symbol->name[0] = '\0';
+	symbol->is_imported = true;
 
 	if (!bin || !bin->sects) {
 		return false;
@@ -2220,7 +2223,7 @@ static bool parse_import_stub(struct MACH0_(obj_t) *bin, struct symbol_t *symbol
 				if (*symstr == '_') {
 					symstr++;
 				}
-				snprintf (symbol->name, R_BIN_MACH0_STRING_LENGTH, "imp.%s", symstr);
+				snprintf (symbol->name, R_BIN_MACH0_STRING_LENGTH, "%s", symstr);
 				return true;
 			}
 		}
@@ -2277,7 +2280,7 @@ static int walk_exports(struct MACH0_(obj_t) *bin, RExportsIterator iterator, vo
 	if (!size) {
 		return count;
 	}
-	trie = malloc (size);
+	trie = calloc (size + 1, 1);
 	if (!trie) {
 		return count;
 	}
@@ -2413,7 +2416,7 @@ static void fill_exports_list(struct MACH0_(obj_t) *bin, const char *name, ut64 
 	sym->paddr = offset;
 	sym->type = "EXT";
 	sym->name = strdup (name);
-	sym->bind = r_str_const (R_BIN_BIND_GLOBAL_STR);
+	sym->bind = R_BIN_BIND_GLOBAL_STR;
 	r_list_append (list, sym);
 }
 
@@ -2543,6 +2546,7 @@ const RList *MACH0_(get_symbols_list)(struct MACH0_(obj_t) *bin) {
 			if (!sym->name) {
 				sym->name = r_str_newf ("unk%d", i);
 			}
+			sym->is_imported = symbol.is_imported;
 			r_list_append (list, sym);
 		}
 	}
@@ -2559,6 +2563,7 @@ const RList *MACH0_(get_symbols_list)(struct MACH0_(obj_t) *bin) {
 			/* is symbol */
 			sym->vaddr = st->n_value;
 			sym->paddr = addr_to_offset (bin, symbols[j].addr);
+			sym->is_imported = symbols[j].is_imported;
 			if (st->n_type & N_EXT) {
 				sym->type = "EXT";
 			} else {
@@ -2638,9 +2643,11 @@ const struct symbol_t *MACH0_(get_symbols)(struct MACH0_(obj_t) *bin) {
 		symbols_size = (symbols_count + 1) * 2 * sizeof (struct symbol_t);
 
 		if (symbols_size < 1) {
+			ht_pp_free (hash);
 			return NULL;
 		}
 		if (!(symbols = calloc (1, symbols_size))) {
+			ht_pp_free (hash);
 			return NULL;
 		}
 		bin->main_addr = 0;
@@ -2677,6 +2684,7 @@ const struct symbol_t *MACH0_(get_symbols)(struct MACH0_(obj_t) *bin) {
 				symbols[j].offset = addr_to_offset (bin, bin->symtab[i].n_value);
 				symbols[j].addr = bin->symtab[i].n_value;
 				symbols[j].size = 0; /* TODO: Is it anywhere? */
+				symbols[j].is_imported = false;
 				if (bin->symtab[i].n_type & N_EXT) {
 					symbols[j].type = R_BIN_MACH0_SYMBOL_TYPE_EXT;
 				} else {
@@ -2771,9 +2779,11 @@ const struct symbol_t *MACH0_(get_symbols)(struct MACH0_(obj_t) *bin) {
 	} else {
 		symbols_size = (symbols_count + 1) * sizeof (struct symbol_t);
 		if (symbols_size < 1) {
+			ht_pp_free (hash);
 			return NULL;
 		}
 		if (!(symbols = calloc (1, symbols_size))) {
+			ht_pp_free (hash);
 			return NULL;
 		}
 	}
@@ -2892,8 +2902,56 @@ static int reloc_comparator(struct reloc_t *a, struct reloc_t *b) {
 	return a->addr - b->addr;
 }
 
+static void parse_relocation_info (struct MACH0_(obj_t) *bin, RSkipList * relocs, ut32 offset, ut32 num) {
+	if (!num || !offset) {
+		return;
+	}
+
+	ut64 total_size = num * sizeof (struct relocation_info);
+	struct relocation_info *info = calloc (num, sizeof (struct relocation_info));
+	if (!info) {
+		return;
+	}
+
+	if (r_buf_read_at (bin->b, offset, (ut8 *) info, total_size) < total_size) {
+		free (info);
+		return;
+	}
+
+	int i;
+	for (i = 0; i < num; i++) {
+		struct relocation_info a_info = info[i];
+		ut32 sym_num = a_info.r_symbolnum;
+		if (sym_num > bin->nsymtab) {
+			continue;
+		}
+
+		ut32 stridx = bin->symtab[sym_num].n_strx;
+		char *sym_name = get_name (bin, stridx, false);
+		if (!sym_name) {
+			continue;
+		}
+
+		struct reloc_t *reloc = R_NEW0 (struct reloc_t);
+		if (!reloc) {
+			return;
+		}
+
+		reloc->addr = offset_to_vaddr (bin, a_info.r_address);
+		reloc->offset = a_info.r_address;
+		reloc->ord = sym_num;
+		reloc->type = a_info.r_type; // enum RelocationInfoType
+		reloc->external = a_info.r_extern;
+		reloc->pc_relative = a_info.r_pcrel;
+		reloc->size = a_info.r_length;
+		r_str_ncpy (reloc->name, sym_name, 256);
+
+		r_skiplist_insert (relocs, reloc);
+	}
+}
+
 RSkipList *MACH0_(get_relocs)(struct MACH0_(obj_t) *bin) {
-	RSkipList *relocs;
+	RSkipList *relocs = NULL;
 	ulebr ur = {NULL};
 	int wordsize = MACH0_(get_bits)(bin) / 8;
 	if (bin->dyld_info) {
@@ -3097,25 +3155,42 @@ RSkipList *MACH0_(get_relocs)(struct MACH0_(obj_t) *bin) {
 			}
 		}
 		R_FREE (opcodes);
-	} else {
+	}
+
+	if (bin->symtab && bin->symstr && bin->sects && bin->indirectsyms) {
 		int j;
-		if (!bin->symtab || !bin->symstr || !bin->sects || !bin->indirectsyms) {
-			return NULL;
-		}
 		int amount = bin->dysymtab.nundefsym;
 		if (amount < 0) {
 			amount = 0;
 		}
-		relocs = r_skiplist_new ((RListFree) &free, (RListComparator) &reloc_comparator);
 		if (!relocs) {
-			return NULL;
+			relocs = r_skiplist_new ((RListFree) &free, (RListComparator) &reloc_comparator);
+			if (!relocs) {
+				return NULL;
+			}
 		}
 		for (j = 0; j < amount; j++) {
 			struct reloc_t *reloc = R_NEW0 (struct reloc_t);
+			if (!reloc) {
+				break;
+			}
 			if (parse_import_ptr (bin, reloc, bin->dysymtab.iundefsym + j)) {
 				reloc->ord = j;
+				r_skiplist_insert (relocs, reloc);
+			} else {
+				R_FREE (reloc);
 			}
 		}
+	}
+
+	if (bin->symtab && bin->dysymtab.extreloff && bin->dysymtab.nextrel) {
+		if (!relocs) {
+			relocs = r_skiplist_new ((RListFree) &free, (RListComparator) &reloc_comparator);
+			if (!relocs) {
+				return NULL;
+			}
+		}
+		parse_relocation_info (bin, relocs, bin->dysymtab.extreloff, bin->dysymtab.nextrel);
 	}
 beach:
 	return relocs;

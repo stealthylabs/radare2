@@ -114,12 +114,11 @@ R_API int try_walkthrough_jmptbl(RAnal *anal, RAnalFunction *fcn, int depth, ut6
 			"CCu switch table (%d cases) at 0x%"PFMT64x " @ 0x%"PFMT64x "\n",
 			(int)(offs/sz), jmptbl_loc, ip);
 		r_strbuf_appendf (anal->cmdtail,
-			"f switch.0x%08"PFMT64x" 1 @ 0x%08"PFMT64x"\n",
-			ip, ip);
+			"f switch.0x%08"PFMT64x" 1 @ 0x%08"PFMT64x"\n", ip, ip);
 		if (default_case != 0 && default_case != UT64_MAX) {
 			r_strbuf_appendf (anal->cmdtail,
-					"f case.default.0x%"PFMT64x " 1 @ 0x%08"PFMT64x "\n",
-					default_case, default_case);
+				"f case.default.0x%"PFMT64x " 1 @ 0x%08"PFMT64x "\n",
+				ip, default_case);
 		}
 	}
 
@@ -294,7 +293,7 @@ R_API bool try_get_jmptbl_info(RAnal *anal, RAnalFunction *fcn, ut64 addr, RAnal
 		if (hint->val != UT64_MAX) {
 			*table_size = hint->val;
 		}
-		eprintf ("TMPAPVAL %llx, %llx\n", addr, tmp_aop.val);
+		// eprintf ("TMPAPVAL %llx, %llx\n", addr, tmp_aop.val);
 		r_anal_hint_free (hint);
 		return true;
 	}
@@ -323,7 +322,7 @@ R_API bool try_get_jmptbl_info(RAnal *anal, RAnalFunction *fcn, ut64 addr, RAnal
 		if (tmp_aop.val == UT64_MAX && tmp_aop.refptr == 0) {
 			isValid = true;
 			*table_size = 0;
-		} else if (tmp_aop.refptr == 0) {
+		} else if (tmp_aop.refptr == 0 || tmp_aop.val != UT64_MAX) {
 			isValid = tmp_aop.val < 0x200;
 			*table_size = tmp_aop.val + 1;
 		} else {

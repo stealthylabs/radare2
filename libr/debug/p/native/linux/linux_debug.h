@@ -72,6 +72,16 @@ struct powerpc_regs_t {
 	unsigned long result;		/* Result of a system call */
 };
 #define R_DEBUG_REG_T struct powerpc_regs_t
+#elif __riscv || __riscv__ || __riscv64__
+
+#include <sys/ucontext.h>
+#include <asm/ptrace.h>
+
+// typedef ut64 riscv64_regs_t [65];
+// #define R_DEBUG_REG_T riscv64_regs_t
+#define R_DEBUG_REG_T struct user_regs_struct 
+// #define R_DEBUG_REG_T mcontext_t 77 784 in size (coz the fpu regs)
+
 #elif __mips__
 
 #include <sys/ucontext.h>
@@ -81,17 +91,21 @@ typedef ut64 mips64_regs_t [274];
 #endif
 
 //API
-bool linux_set_options (RDebug *dbg, int pid);
-int linux_step (RDebug *dbg);
-RDebugReasonType linux_ptrace_event (RDebug *dbg, int pid, int status);
-int linux_attach (RDebug *dbg, int pid);
-RDebugInfo *linux_info (RDebug *dbg, const char *arg);
-RList *linux_thread_list (int pid, RList *list);
-RDebugPid *fill_pid_info (const char *info, const char *path, int tid);
-int linux_reg_read (RDebug *dbg, int type, ut8 *buf, int size);
-int linux_reg_write (RDebug *dbg, int type, const ut8 *buf, int size);
-RList *linux_desc_list (int pid);
-int linux_handle_signals (RDebug *dbg);
-int linux_dbg_wait (RDebug *dbg, int pid);
-char *linux_reg_profile (RDebug *dbg);
-int match_pid (const void *pid_o, const void *th_o);
+bool linux_set_options(RDebug *dbg, int pid);
+int linux_step(RDebug *dbg);
+RDebugReasonType linux_ptrace_event(RDebug *dbg, int pid, int status);
+int linux_attach(RDebug *dbg, int pid);
+bool linux_attach_new_process(RDebug *dbg, int pid);
+RDebugInfo *linux_info(RDebug *dbg, const char *arg);
+RList *linux_pid_list(int pid, RList *list);
+RList *linux_thread_list(RDebug *dbg, int pid, RList *list);
+bool linux_select(RDebug *dbg, int pid, int tid);
+RDebugPid *fill_pid_info(const char *info, const char *path, int tid);
+int linux_reg_read(RDebug *dbg, int type, ut8 *buf, int size);
+int linux_reg_write(RDebug *dbg, int type, const ut8 *buf, int size);
+RList *linux_desc_list(int pid);
+bool linux_stop_threads(RDebug *dbg, int except);
+int linux_handle_signals(RDebug *dbg, int tid);
+int linux_dbg_wait(RDebug *dbg, int pid);
+char *linux_reg_profile(RDebug *dbg);
+int match_pid(const void *pid_o, const void *th_o);

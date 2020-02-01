@@ -16,6 +16,7 @@ extern "C" {
 #include <r_util/r_signal.h>
 #include <r_util/r_stack.h>
 #include <r_util/r_str.h>
+#include <r_util/r_str_constpool.h>
 #include <r_util/r_sys.h>
 #include <r_util/r_file.h>
 #include <r_vector.h>
@@ -63,12 +64,16 @@ R_LIB_VERSION_HEADER(r_cons);
 typedef int (*RConsGetSize)(int *rows);
 typedef int (*RConsGetCursor)(int *rows);
 typedef bool (*RConsIsBreaked)(void);
+typedef void (*RConsFlush)(void);
+typedef void (*RConsGrepCallback)(const char *grep);
 
 typedef struct r_cons_bind_t {
 	RConsGetSize get_size;
 	RConsGetCursor get_cursor;
 	PrintfCallback cb_printf;
 	RConsIsBreaked is_breaked;
+	RConsFlush cb_flush;
+	RConsGrepCallback cb_grep;
 } RConsBind;
 
 typedef struct r_cons_grep_t {
@@ -354,6 +359,7 @@ typedef struct r_cons_canvas_t {
 	int *bsize;
 	const char *attr; //The current attr (inserted on each write)
 	HtUP *attrs; // all the different attributes <key: unsigned int loc, const char *attr>
+	RStrConstPool constpool; // Pool for non-compile-time attrs
 	int sx; // scrollx
 	int sy; // scrolly
 	int color;
@@ -501,7 +507,7 @@ typedef struct r_cons_t {
 	struct r_line_t *line;
 	const char **vline;
 	int refcnt;
-	bool newline;
+	R_DEPRECATE bool newline;
 #if __WINDOWS__
 	int ansicon;
 #endif
@@ -522,6 +528,7 @@ typedef struct r_cons_t {
 	bool click_set;
 	int click_x;
 	int click_y;
+	bool onestream;
 	bool show_vals;		// show which section in Vv
 	// TODO: move into instance? + avoid unnecessary copies
 } RCons;
@@ -818,7 +825,7 @@ R_API void r_cons_pipe_close(int fd);
 R_API bool r_cons_is_ansicon(void);
 R_API void r_cons_w32_clear(void);
 R_API void r_cons_w32_gotoxy(int fd, int x, int y);
-R_API int r_cons_w32_print(const ut8 *ptr, int len, bool vmode);
+R_API int r_cons_w32_print(const char *ptr, int len, bool vmode);
 R_API int r_cons_win_printf(bool vmode, const char *fmt, ...);
 R_API int r_cons_win_eprintf(bool vmode, const char *fmt, ...);
 R_API int r_cons_win_vhprintf(DWORD hdl, bool vmode, const char *fmt, va_list ap);
@@ -862,6 +869,8 @@ R_API void r_cons_chop(void);
 R_API void r_cons_set_raw(bool b);
 R_API void r_cons_set_interactive(bool b);
 R_API void r_cons_set_last_interactive(void);
+R_API void r_cons_set_utf8(bool b);
+R_API void r_cons_grep(const char *grep);
 
 /* output */
 R_API int r_cons_printf(const char *format, ...);
@@ -884,7 +893,7 @@ R_API void r_cons_2048(bool color);
 R_API void r_cons_memset(char ch, int len);
 R_API void r_cons_visual_flush(void);
 R_API void r_cons_visual_write(char *buffer);
-R_API int r_cons_is_utf8(void);
+R_API bool r_cons_is_utf8(void);
 R_API void r_cons_cmd_help(const char * help[], bool use_color);
 R_API void r_cons_log_stub(const char *output, const char *funcname, const char *filename,
  unsigned int lineno, unsigned int level, const char *tag, const char *fmtstr, ...);
@@ -1155,7 +1164,6 @@ typedef struct r_panels_t {
 	int curnode;
 	int mouse_orig_x;
 	int mouse_orig_y;
-	bool isResizing;
 	bool autoUpdate;
 	bool mouse_on_edge_x;
 	bool mouse_on_edge_y;
@@ -1170,7 +1178,6 @@ typedef struct r_panels_t {
 	RPanelsLayout layout;
 	RList *snows;
 	char *name;
-	ut64 addr;
 } RPanels;
 
 typedef enum {
@@ -1191,6 +1198,13 @@ typedef struct r_panels_root_t {
 
 #ifdef __cplusplus
 }
+#endif
+
+#if ONE_STREAM_HACK && !R_UTIL_SRC && !R_SEARCH_SRC && !R_FLAG_SRC && !R_BIN_SRC \
+	&& !R_JAVA_SRC && !R_ASM_SRC && !R_EGG_SRC
+R_API int r_cons_onestream_printf(const char *format, ...);
+#undef eprintf
+#define eprintf(...) r_cons_onestream_printf(__VA_ARGS__)
 #endif
 
 #endif

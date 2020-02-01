@@ -1261,6 +1261,10 @@ R_API int r_core_visual_classes(RCore *core) {
 				r_core_seek (core, mur->vaddr, true);
 				return true;
 			}
+			if (fur) {
+				r_core_seek (core, fur->vaddr, true);
+				return true;
+			}
 			if (cur) {
 				oldcur = index;
 				index = 0;
@@ -2066,7 +2070,7 @@ R_API int r_core_visual_comments (RCore *core) {
 static void config_visual_hit_i(RCore *core, const char *name, int delta) {
 	struct r_config_node_t *node;
 	node = r_config_node_get (core->config, name);
-	if (node && ((node->flags & CN_INT) || (node->flags & CN_OFFT))) {
+	if (node && r_config_node_is_int (node)) {
 		int hitDelta = r_config_get_i (core->config, name) + delta;
 		(void) r_config_set_i (core->config, name, hitDelta);
 	}
@@ -2080,7 +2084,7 @@ static void config_visual_hit(RCore *core, const char *name, int editor) {
 	if (!(node = r_config_node_get (core->config, name))) {
 		return;
 	}
-	if (node->flags & CN_BOOL) {
+	if (r_config_node_is_bool (node)) {
 		r_config_set_i (core->config, name, node->i_value? 0:1);
 	} else {
 // XXX: must use config_set () to run callbacks!
@@ -2655,7 +2659,7 @@ static void function_rename(RCore *core, ut64 addr, const char *name) {
 			r_flag_unset_name (core->flags, fcn->name);
 			free (fcn->name);
 			fcn->name = strdup (name);
-			r_flag_set (core->flags, name, addr, r_anal_fcn_size (fcn));
+			r_flag_set (core->flags, name, addr, r_anal_function_size_from_entry (fcn));
 			break;
 		}
 	}
@@ -2731,13 +2735,13 @@ static ut64 var_functions_show(RCore *core, int idx, int show, int cols) {
 					var_functions = r_str_newf ("%c%c %s0x%08"PFMT64x"" Color_RESET" %4d %s%s"Color_RESET"",
 							(seek == fcn->addr)?'>':' ',
 							(idx==i)?'*':' ',
-							color_addr, fcn->addr, r_anal_fcn_realsize (fcn),
+							color_addr, fcn->addr, r_anal_function_realsize (fcn),
 							color_fcn, fcn->name);
 				} else {
 					var_functions = r_str_newf ("%c%c 0x%08"PFMT64x" %4d %s",
 							(seek == fcn->addr)?'>':' ',
 							(idx==i)?'*':' ',
-							fcn->addr, r_anal_fcn_realsize (fcn), fcn->name);
+							fcn->addr, r_anal_function_realsize (fcn), fcn->name);
 				}
 				if (var_functions) {
 					if (!r_cons_singleton ()->show_vals) {
@@ -2972,8 +2976,10 @@ static ut64 r_core_visual_anal_refresh (RCore *core) {
 			r_cons_strcat ("\n" Color_RESET);
 		}
 		r_core_vmenu_append_help (buf, help_var_visual);
-		r_cons_printf ("%s", r_strbuf_drain (buf));
+		char *drained = r_strbuf_drain (buf);
+		r_cons_printf ("%s", drained);
 		addr = var_variables_show (core, option, &variable_option, 1, cols);
+		free (drained);
 		// var_index_show (core->anal, fcn, addr, option);
 		break;
 	case 2:
@@ -3010,7 +3016,7 @@ static ut64 r_core_visual_anal_refresh (RCore *core) {
 }
 
 static void r_core_visual_anal_refresh_oneshot (RCore *core) {
-	r_core_task_enqueue_oneshot (core, (RCoreTaskOneShot) r_core_visual_anal_refresh, core);
+	r_core_task_enqueue_oneshot (&core->tasks, (RCoreTaskOneShot) r_core_visual_anal_refresh, core);
 }
 
 static void r_core_visual_debugtraces_help(RCore *core) {
@@ -3794,7 +3800,7 @@ onemoretime:
 				r_sys_sleep (1);
 			}
 		} else if (tgt_addr != UT64_MAX) {
-			RAnalFunction *fcn = r_anal_get_fcn_at (core->anal, tgt_addr, R_ANAL_FCN_TYPE_NULL);
+			RAnalFunction *fcn = r_anal_get_function_at (core->anal, tgt_addr);
 			RFlagItem *f = r_flag_get_i (core->flags, tgt_addr);
 			if (fcn) {
 				q = r_str_newf ("?i Rename function %s to;afn `yp` 0x%"PFMT64x,
@@ -3824,7 +3830,7 @@ onemoretime:
 				r_cons_flush ();
 				r_line_set_prompt ("color: ");
 				if (r_cons_fgets (cmd, sizeof (cmd)-1, 0, NULL) > 0) {
-					r_flag_color (core->flags, item, cmd);
+					r_flag_item_set_color (item, cmd);
 					r_cons_set_raw (1);
 					r_cons_show_cursor (false);
 				}
@@ -4001,30 +4007,17 @@ onemoretime:
 		break;
 	case 'f':
 		{
-			int funsize = 0;
 			RAnalFunction *fcn = r_anal_get_fcn_in (core->anal, core->offset, 0);
 			if (fcn) {
 				r_anal_fcn_resize (core->anal, fcn, core->offset - fcn->addr);
 			}
-			//int depth = r_config_get_i (core->config, "anal.depth");
-			if (core->print->cur_enabled) {
-				if (core->print->ocur != -1) {
-					funsize = 1 + R_ABS (core->print->cur - core->print->ocur);
-				}
-				//depth = 0;
-			}
 			r_cons_break_push (NULL, NULL);
 			r_core_cmdf (core, "af @ 0x%08" PFMT64x, off); // required for thumb autodetection
 			r_cons_break_pop ();
-			if (funsize) {
-				RAnalFunction *f = r_anal_get_fcn_in (core->anal, off, -1);
-				r_anal_fcn_set_size (core->anal, f, funsize);
-			}
 		}
 		break;
-        case 'v':
+	case 'v':
         {
-		RAnalOp op;
 		ut64 N;
 		char *endptr = NULL;
 		char *end_off = r_cons_input ("Last hexadecimal digits of instruction: ");
@@ -4047,19 +4040,25 @@ onemoretime:
 		}
 		ut64 mask = incr - 1;
 
-		ut64 start_off;
-		if ((off & mask) <= N) {
-			start_off = (off & ~mask) ^ N;
-		} else {
-			start_off = ((off & ~mask) ^ incr) ^ N;
+		ut64 start_off = (off & ~mask) ^ N;
+		if ((off & mask) > N) {
+			if (start_off > incr) {
+				start_off -= incr;
+			} else {
+				start_off = N;
+			}
 		}
 
 		ut64 try_off;
 		bool found = false;
+		RAnalOp *op = NULL;
 		for (try_off = start_off; try_off < start_off + incr*16; try_off += incr) {
-			r_anal_op (core->anal, &op, try_off,
-				core->block + try_off - core->offset, 32, R_ANAL_OP_MASK_ALL);
-			if (op.var) {
+			r_anal_op_free (op);
+			op = r_core_anal_op (core, try_off, R_ANAL_OP_MASK_ALL);
+			if (!op) {
+				break;
+			}
+			if (op->var) {
 				found = true;
 				break;
 			}
@@ -4068,7 +4067,7 @@ onemoretime:
 		if (found) {
 			RAnalFunction *fcn = r_anal_get_fcn_in (core->anal, off, 0);
 			if (fcn) {
-				RAnalVar *bar = r_anal_var_get_byname (core->anal, fcn->addr, op.var->name);
+				RAnalVar *bar = r_anal_var_get_byname (core->anal, fcn->addr, op->var->name);
 				if (bar) {
 					char *newname = r_cons_input (sdb_fmt ("New variable name for '%s': ", bar->name));
 					if (newname && *newname) {
@@ -4089,7 +4088,7 @@ onemoretime:
 			r_cons_any_key (NULL);
 		}
 
-		r_anal_op_fini (&op);
+		r_anal_op_free (op);
 		break;
         }
 	case 'Q':

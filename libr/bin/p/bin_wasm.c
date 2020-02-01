@@ -8,6 +8,7 @@
 #include <r_bin.h>
 
 #include "wasm/wasm.h"
+#include "../format/wasm/wasm.h"
 
 static bool check_buffer (RBuffer *rbuf) {
 	ut8 buf[4] = { 0 };
@@ -151,24 +152,26 @@ static RList *symbols (RBinFile *bf) {
 		if (!(ptr = R_NEW0 (RBinSymbol))) {
 			goto bad_alloc;
 		}
-		ptr->name = r_str_newf ("imp.%s.%s", imp->module_str, imp->field_str);
-		ptr->forwarder = r_str_const ("NONE");
-		ptr->bind = r_str_const ("NONE");
+		ptr->name = strdup (imp->field_str);
+		ptr->libname = strdup (imp->module_str);
+		ptr->is_imported = true;
+		ptr->forwarder = "NONE";
+		ptr->bind = "NONE";
 		switch (imp->kind) {
 		case R_BIN_WASM_EXTERNALKIND_Function:
-			ptr->type = r_str_const (R_BIN_TYPE_FUNC_STR);
+			ptr->type = R_BIN_TYPE_FUNC_STR;
 			fcn_idx++;
 			break;
 		case R_BIN_WASM_EXTERNALKIND_Table:
-			ptr->type = r_str_const ("TABLE");
+			ptr->type = "TABLE";
 			table_idx++;
 			break;
 		case R_BIN_WASM_EXTERNALKIND_Memory:
-			ptr->type = r_str_const ("MEMORY");
+			ptr->type = "MEMORY";
 			mem_idx++;
 			break;
 		case R_BIN_WASM_EXTERNALKIND_Global:
-			ptr->type = r_str_const (R_BIN_BIND_GLOBAL_STR);
+			ptr->type = R_BIN_BIND_GLOBAL_STR;
 			global_idx++;
 			break;
 		}
@@ -201,11 +204,11 @@ static RList *symbols (RBinFile *bf) {
 			ptr->name = r_str_newf ("fcn.%d", fcn_idx);
 		}
 
-		ptr->forwarder = r_str_const ("NONE");
+		ptr->forwarder = "NONE";
 		if (!ptr->bind) {
-			ptr->bind = r_str_const ("NONE");
+			ptr->bind = "NONE";
 		}
-		ptr->type = r_str_const (R_BIN_TYPE_FUNC_STR);
+		ptr->type = R_BIN_TYPE_FUNC_STR;
 		ptr->size = func->len;
 		ptr->vaddr = (ut64)func->code;
 		ptr->paddr = (ut64)func->code;
@@ -252,19 +255,19 @@ static RList *imports (RBinFile *bf) {
 		ptr->name = strdup (import->field_str);
 		ptr->classname = strdup (import->module_str);
 		ptr->ordinal = i;
-		ptr->bind = r_str_const ("NONE");
+		ptr->bind = "NONE";
 		switch (import->kind) {
 		case R_BIN_WASM_EXTERNALKIND_Function:
-			ptr->type = r_str_const ("FUNC");
+			ptr->type = "FUNC";
 			break;
 		case R_BIN_WASM_EXTERNALKIND_Table:
-			ptr->type = r_str_const ("TABLE");
+			ptr->type = "TABLE";
 			break;
 		case R_BIN_WASM_EXTERNALKIND_Memory:
-			ptr->type = r_str_const ("MEM");
+			ptr->type = "MEM";
 			break;
 		case R_BIN_WASM_EXTERNALKIND_Global:
-			ptr->type = r_str_const ("GLOBAL");
+			ptr->type = "GLOBAL";
 			break;
 		}
 		r_list_append (ret, ptr);

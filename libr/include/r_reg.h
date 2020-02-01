@@ -22,6 +22,7 @@ typedef enum {
 	R_REG_TYPE_FPU,
 	R_REG_TYPE_MMX,
 	R_REG_TYPE_XMM,
+	R_REG_TYPE_YMM,
 	R_REG_TYPE_FLG,
 	R_REG_TYPE_SEG,
 	R_REG_TYPE_LAST,
@@ -93,6 +94,7 @@ typedef struct r_reg_item_t {
 	int packed_size; /* 0 means no packed register, 1byte pack, 2b pack... */
 	bool is_float;
 	char *flags;
+	char *comment;
 	int index;
 	int arena; /* in which arena is this reg living */
 } RRegItem;

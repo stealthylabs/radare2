@@ -14,6 +14,7 @@ static const char *help_msg_w[] = {
 	"w6","[de] base64/hex","write base64 [d]ecoded or [e]ncoded string",
 	"wa","[?] push ebp","write opcode, separated by ';' (use '\"' around the command)",
 	"waf"," f.asm","assemble file and write bytes",
+	"waF"," f.asm","assemble file and write bytes and show 'wx' op with hexpair bytes of assembled code",
 	"wao","[?] op","modify opcode (change conditional of jump. nop, etc)",
 	"wA","[?] r 0","alter/modify opcode at current seek (see wA?)",
 	"wb"," 010203","fill current block with cyclic hexpairs",
@@ -45,6 +46,8 @@ static const char *help_msg_wa[] = {
 	"wa*", " mov eax, 33", "show 'wx' op with hexpair bytes of assembled opcode",
 	"\"wa nop;nop\"", "" , "assemble more than one instruction (note the quotes)",
 	"waf", " f.asm" , "assemble file and write bytes",
+	"waF"," f.asm","assemble file and write bytes and show 'wx' op with hexpair bytes of assembled code",
+	"waF*"," f.asm","assemble file and show 'wx' op with hexpair bytes of assembled code",
 	"wao?", "", "show help for assembler operation on current opcode (hack)",
 	NULL
 };
@@ -230,6 +233,7 @@ static bool encrypt_or_decrypt_block(RCore *core, const char *algo, const char *
 	}
 	if (!no_key_mode && keylen < 1) {
 		eprintf ("%s key not defined. Use -S [key]\n", ((!direction) ? "Encryption" : "Decryption"));
+		free (binkey);
 		return false;
 	}
 	RCrypto *cry = r_crypto_new ();
@@ -1386,6 +1390,11 @@ static int cmd_write(void *data, const char *input) {
 		cmd_wf (core, input);
 		break;
 	case 'w': // "ww"
+		len = r_str_unescape (str);
+		if (len < 1) {
+			break;
+		}
+		len++;
 		str++;
 		len = (len - 1) << 1;
 		tmp = (len > 0) ? malloc (len + 1) : NULL;
@@ -1553,8 +1562,10 @@ static int cmd_write(void *data, const char *input) {
 						}
 						if (*b) {
 							RAsmCode *ac = r_asm_massemble (core->assembler, b);
-							r_io_write_at (core->io, addr, ac->bytes, ac->len);
-							r_asm_code_free (ac);
+							if (ac) {
+								r_io_write_at (core->io, addr, ac->bytes, ac->len);
+								r_asm_code_free (ac);
+							}
 						}
 						b = a;
 						addr = nextaddr;
@@ -1577,7 +1588,7 @@ static int cmd_write(void *data, const char *input) {
 					if (acode) {
 						char* hex = r_asm_code_get_hex (acode);
 						if (input[2] == '*') {
-							cmd_write_hexpair (core, hex);
+							r_cons_printf ("wx %s\n", hex);
 						} else {
 							if (r_config_get_i (core->config, "scr.prompt")) {
 								eprintf ("Written %d byte(s) (%s)=wx %s\n", acode->len, input+1, hex);
@@ -1693,15 +1704,7 @@ static int cmd_write(void *data, const char *input) {
 		break;
 	default:
 	case '?': // "w?"
-		if (core->oobi) {
-			eprintf ("Writing oobi buffer!\n");
-			r_io_use_fd (core->io, core->file->fd);
-			r_io_write (core->io, core->oobi, core->oobi_len);
-			WSEEK (core, core->oobi_len);
-			r_core_block_read (core);
-		} else {
-			r_core_cmd_help (core, help_msg_w);
-		}
+		r_core_cmd_help (core, help_msg_w);
 		break;
 	}
 	R_FREE (ostr);

@@ -207,10 +207,11 @@ static RList* symbols(RBinFile *bf) {
 				break;
 			}
 			ptr->name = strdup ((char *)symbols[i].name);
-			ptr->forwarder = r_str_const ((char *)symbols[i].forwarder);
+			ptr->libname = *symbols[i].libname ? strdup ((char *)symbols[i].libname) : NULL;
+			ptr->forwarder = r_str_constpool_get (&bf->rbin->constpool, (char *)symbols[i].forwarder);
 			//strncpy (ptr->bind, "NONE", R_BIN_SIZEOF_STRINGS);
-			ptr->bind = r_str_const (R_BIN_BIND_GLOBAL_STR);
-			ptr->type = r_str_const (R_BIN_TYPE_FUNC_STR);
+			ptr->bind = R_BIN_BIND_GLOBAL_STR;
+			ptr->type = R_BIN_TYPE_FUNC_STR;
 			ptr->size = 0;
 			ptr->vaddr = symbols[i].vaddr;
 			ptr->paddr = symbols[i].paddr;
@@ -227,10 +228,12 @@ static RList* symbols(RBinFile *bf) {
 				break;
 			}
 			//strncpy (ptr->name, (char*)symbols[i].name, R_BIN_SIZEOF_STRINGS);
-			ptr->name = r_str_newf ("imp.%s", imports[i].name);
+			ptr->name = strdup ((const char *)imports[i].name);
+			ptr->libname = strdup ((const char *)imports[i].libname);
+			ptr->is_imported = true;
 			//strncpy (ptr->forwarder, (char*)imports[i].forwarder, R_BIN_SIZEOF_STRINGS);
-			ptr->bind = r_str_const ("NONE");
-			ptr->type = r_str_const (R_BIN_TYPE_FUNC_STR);
+			ptr->bind = "NONE";
+			ptr->type = R_BIN_TYPE_FUNC_STR;
 			ptr->size = 0;
 			ptr->vaddr = imports[i].vaddr;
 			ptr->paddr = imports[i].paddr;
@@ -287,8 +290,9 @@ static RList* imports(RBinFile *bf) {
 		}
 		filter_import (imports[i].name);
 		ptr->name = strdup ((char*)imports[i].name);
-		ptr->bind = r_str_const ("NONE");
-		ptr->type = r_str_const ("FUNC");
+		ptr->libname = strdup ((char*)imports[i].libname);
+		ptr->bind = "NONE";
+		ptr->type = "FUNC";
 		ptr->ordinal = imports[i].ordinal;
 		// NOTE(eddyb) a PE hint is just an optional possible DLL export table
 		// index for the import. There is no point in exposing it.

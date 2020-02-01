@@ -11,8 +11,8 @@ Doxyfile and generate HTML documentation into
 
 If you're contributing code or willing to update existing code, you can use the
 doxygen C-style comments to improve documentation and comments in code.
-See the [Doxygen Manual](https://www.stack.nl/~dimitri/doxygen/manual/index.html)
-for more info. Example usage can be found [here](https://www.stack.nl/~dimitri/doxygen/manual/docblocks.html)
+See the [Doxygen Manual](http://www.doxygen.nl/manual/index.html)
+for more info. Example usage can be found [here](http://www.doxygen.nl/manual/docblocks.html)
 ```c
 /**
  * \brief Find the min and max addresses in an RList of maps.
@@ -470,16 +470,6 @@ The issues page of Github contains a list of all the bugs that
 have been reported classified with labels by difficulty, type,
 milestone, etc. It is a good place to start if you are looking
 to contribute.
-
-## Contributing with patches
-
-All the development happens in the git repository. It is
-good that all patches can be applied against the `git HEAD`.
-
-I can get patches in unidiff format like this:
-```sh
-   git diff > p
-```
 
 ## HOW TO RELEASE
 

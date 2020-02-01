@@ -1,3 +1,5 @@
+/* radare - LGPL - Copyright 2019 - GustavoLCR */
+
 #include "ne.h"
 
 static char *__get_target_os(r_bin_ne_obj_t *bin) {
@@ -80,7 +82,7 @@ RList *r_bin_ne_get_segments(r_bin_ne_obj_t *bin) {
 		}
 		bs->size = se->length;
 		bs->vsize = se->minAllocSz ? se->minAllocSz : 64000;
-		bs->bits = 16;
+		bs->bits = R_SYS_BITS_16;
 		bs->is_data = se->flags & IS_DATA;
 		bs->perm = __translate_perms (se->flags);
 		bs->paddr = (ut64)se->offset * bin->alignment;
@@ -134,7 +136,7 @@ RList *r_bin_ne_get_symbols(r_bin_ne_obj_t *bin) {
 		}
 		sym->name = name;
 		if (!first) {
-			sym->bind = r_str_const (R_BIN_BIND_GLOBAL_STR);
+			sym->bind = R_BIN_BIND_GLOBAL_STR;
 		}
 		ut16 entry_off = r_buf_read_le16_at (bin->buf, off);
 		off += 2;
@@ -159,7 +161,7 @@ RList *r_bin_ne_get_symbols(r_bin_ne_obj_t *bin) {
 			}
 			sym->name = r_str_newf ("entry%d", i - 1);
 			sym->paddr = en->paddr;
-			sym->bind = r_str_const (R_BIN_BIND_GLOBAL_STR);
+			sym->bind = R_BIN_BIND_GLOBAL_STR;
 			sym->ordinal = i;
 			r_list_append (symbols, sym);
 		}
@@ -322,6 +324,7 @@ RList *r_bin_ne_get_imports(r_bin_ne_obj_t *bin) {
 		}
 		ut8 sz = r_buf_read8_at (bin->buf, off);
 		if (!sz) {
+			r_bin_import_free (imp);
 			break;
 		}
 		off++;

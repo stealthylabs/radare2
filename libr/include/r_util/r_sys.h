@@ -21,17 +21,21 @@ enum {
 	R_SYS_BITS_64 = 8,
 };
 
-typedef struct _os_info {
-	char name[32];
-	int major;
-	int minor;
-	int patch;
-	int compilation;
-} os_info;
+typedef struct {
+	char *sysname;
+	char *nodename;
+	char *release;
+	char *version;
+	char *machine;
+} RSysInfo;
 
+R_API RSysInfo *r_sys_info(void);
+R_API void r_sys_info_free(RSysInfo *si);
+
+R_API int r_sys_sigaction(int *sig, void (*handler) (int));
+R_API int r_sys_signal(int sig, void (*handler) (int));
 R_API char **r_sys_get_environ(void);
 R_API void r_sys_set_environ(char **e);
-R_API os_info *r_sys_get_osinfo(void);
 R_API ut64 r_sys_now(void);
 R_API const char *r_time_to_string (ut64 ts);
 R_API int r_sys_fork(void);
@@ -76,7 +80,7 @@ R_API int r_sys_cmd_str_full(const char *cmd, const char *input, char **output, 
 #define r_sys_conv_utf8_to_win(buf) r_utf8_to_utf16 (buf)
 #define r_sys_conv_utf8_to_win_l(buf, len) r_utf8_to_utf16_l (buf, len)
 #define r_sys_conv_win_to_utf8(buf) r_utf16_to_utf8 (buf)
-#define r_sys_conv_win_to_utf8_l(buf, len) r_utf16_to_utf8_l (buf, len)
+#define r_sys_conv_win_to_utf8_l(buf, len) r_utf16_to_utf8_l ((wchar_t *)buf, len)
 #else
 #define W32_TCHAR_FSTR "%s"
 #define W32_TCALL(name) name"A"
@@ -85,7 +89,6 @@ R_API int r_sys_cmd_str_full(const char *cmd, const char *input, char **output, 
 #define r_sys_conv_win_to_utf8(buf) r_acp_to_utf8 (buf)
 #define r_sys_conv_win_to_utf8_l(buf, len) r_acp_to_utf8_l (buf, len)
 #endif
-R_API os_info *r_sys_get_winver(void);
 R_API char *r_sys_get_src_dir_w32(void);
 R_API bool r_sys_cmd_str_full_w32(const char *cmd, const char *input, char **output, int *outlen, char **sterr);
 R_API bool r_sys_create_child_proc_w32(const char *cmdline, HANDLE in, HANDLE out, HANDLE err);

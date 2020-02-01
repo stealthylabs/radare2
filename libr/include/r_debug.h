@@ -307,6 +307,8 @@ typedef struct r_debug_t {
 	bool pc_at_bp; /* after a breakpoint, is the pc at the bp? */
 	bool pc_at_bp_set; /* is the pc_at_bp variable set already? */
 
+	REvent *ev;
+
 	RAnal *anal;
 	RList *maps; // <RDebugMap>
 	RList *maps_user; // <RDebugMap>
@@ -404,6 +406,7 @@ typedef struct r_debug_plugin_t {
 // TODO: rename to r_debug_process_t ? maybe a thread too ?
 typedef struct r_debug_pid_t {
 	int pid;
+	int ppid;
 	char status; /* stopped, running, zombie, sleeping ,... */
 	int runnable; /* when using 'run', 'continue', .. this proc will be runnable */
 	bool signalled;
@@ -519,7 +522,7 @@ R_API ut64 r_debug_reg_get(RDebug *dbg, const char *name);
 R_API ut64 r_debug_reg_get_err(RDebug *dbg, const char *name, int *err, utX *value);
 
 R_API ut64 r_debug_execute(RDebug *dbg, const ut8 *buf, int len, int restore);
-R_API int r_debug_map_sync(RDebug *dbg);
+R_API bool r_debug_map_sync(RDebug *dbg);
 
 R_API int r_debug_stop(RDebug *dbg);
 
@@ -534,9 +537,11 @@ R_API bool r_debug_arg_set(RDebug *dbg, int fast, int num, ut64 value);
 
 /* breakpoints (most in r_bp, this calls those) */
 R_API RBreakpointItem *r_debug_bp_add(RDebug *dbg, ut64 addr, int hw, bool watch, int rw, char *module, st64 m_delta);
+R_API void r_debug_bp_rebase(RDebug *dbg, ut64 old_base, ut64 new_base);
+R_API void r_debug_bp_update(RDebug *dbg);
 
 /* pid */
-R_API int r_debug_thread_list(RDebug *dbg, int pid);
+R_API int r_debug_thread_list(RDebug *dbg, int pid, char fmt);
 
 R_API void r_debug_tracenodes_reset(RDebug *dbg);
 

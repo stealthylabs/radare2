@@ -91,11 +91,11 @@ static const char *help_msg_slash_a[] = {
 };
 
 static const char *help_msg_slash_c[] = {
-	"Usage: /c", "[acdr] [algorithm] [digest]", "Search for crypto materials",
+	"Usage: /c", "", "Search for crypto materials",
 	"/ca", "", "Search for AES keys expanded in memory",
 	"/cc", "[algo] [digest]", "Find collisions (bruteforce block length values until given checksum is found)",
 	"/cd", "", "Search for ASN1/DER certificates",
-	"/cr", "", "Search for private RSA keys",
+	"/cr", "", "Search for ASN1/DER private keys (RSA and ECC)",
 	NULL
 };
 
@@ -152,7 +152,7 @@ struct search_parameters {
 	bool inverse;
 	bool crypto_search;
 	bool aes_search;
-	bool rsa_search;
+	bool privkey_search;
 };
 
 struct endlist_pair {
@@ -258,7 +258,6 @@ static void cmd_search_bin(RCore *core, RInterval itv) {
 			if (plug->size) {
 				RBinOptions opt = {
 					.pluginname = plug->name,
-					.offset = core->offset,
 					.baseaddr = 0,
 					.loadaddr = 0,
 					.sz = 4096,
@@ -334,8 +333,6 @@ static int count_functions(RCore *core) {
 R_API int r_core_search_preludes(RCore *core, bool log) {
 	int ret = -1;
 	const char *prelude = r_config_get (core->config, "anal.prelude");
-	const char *arch = r_config_get (core->config, "asm.arch");
-	int bits = r_config_get_i (core->config, "asm.bits");
 	ut64 from = UT64_MAX;
 	ut64 to = UT64_MAX;
 	const char *where = r_config_get (core->config, "anal.in");
@@ -365,60 +362,20 @@ R_API int r_core_search_preludes(RCore *core, bool log) {
 			int kwlen = r_hex_str2bin (prelude, kw);
 			ret = r_core_search_prelude (core, from, to, kw, kwlen, NULL, 0);
 			free (kw);
-		} else if (strstr (arch, "ppc")) {
-			ret = r_core_search_prelude (core, from, to,
-				(const ut8 *) "\x7c\x08\x02\xa6", 4, NULL, 0);
-		} else if (strstr (arch, "arm")) {
-			switch (bits) {
-			case 16:
-				r_core_search_prelude (core, from, to,
-					(const ut8 *) "\x00\xb5", 2, (const ut8*)"\x0f\xff", 2);
-				ret = r_core_search_prelude (core, from, to,
-					(const ut8 *) "\x08\xb5", 2, (const ut8*)"\x0f\xff", 2);
-				break;
-			case 32:
-				ret = r_core_search_prelude (core, from, to,
-					(const ut8 *) "\x00\x00\x2d\xe9", 4,
-					(const ut8 *) "\x0f\x0f\xff\xff", 4);
-				break;
-			case 64:
-				r_core_search_prelude (core, from, to, (const ut8 *) "\xf0\x00\x00\xd1", 4, (const ut8*)"\xf0\x00\x00\xff", 4);
-				r_core_search_prelude (core, from, to, (const ut8 *) "\xf0\x00\x00\xa9", 4, (const ut8*)"\xf0\x00\x00\xff", 4);
-				// PACISB : 7f2303d5 ff
-				r_core_search_prelude (core, from, to, (const ut8 *) "\x7f\x23\x03\xd5\xff", 5, NULL, 0);
-				break;
-			default:
-				if (log) {
-					eprintf ("ap: Unsupported bits: %d\n", bits);
-				}
-			}
-		} else if (strstr (arch, "mips")) {
-			ret = r_core_search_prelude (core, from, to,
-				(const ut8 *) "\x27\xbd\x00", 3, NULL, 0);
-		} else if (strstr (arch, "x86")) {
-			switch (bits) {
-			case 32:
-				r_core_search_prelude (core, from, to, // mov edi, edi;push ebp; mov ebp,esp
-					(const ut8 *) "\x8b\xff\x55\x8b\xec", 5, NULL, 0);
-				r_core_search_prelude (core, from, to,
-					(const ut8 *) "\x55\x89\xe5", 3, NULL, 0);
-				r_core_search_prelude (core, from, to, // push ebp; mov ebp, esp
-					(const ut8 *) "\x55\x8b\xec", 3, NULL, 0);
-				break;
-			case 64:
-				r_core_search_prelude (core, from, to,
-					(const ut8 *) "\x55\x48\x89\xe5", 4, NULL, 0);
-				r_core_search_prelude (core, from, to,
-					(const ut8 *) "\x55\x48\x8b\xec", 4, NULL, 0);
-				break;
-			default:
-				if (log) {
-					eprintf ("ap: Unsupported bits: %d\n", bits);
-				}
-			}
 		} else {
-			if (log) {
-				eprintf ("ap: Unsupported asm.arch and asm.bits\n");
+			RList *preds = r_anal_preludes (core->anal);
+			if (preds) {
+				RListIter *iter;
+				RSearchKeyword *kw;
+				r_list_foreach (preds, iter, kw) {
+					ret = r_core_search_prelude (core, from, to,
+						kw->bin_keyword, kw->keyword_length,
+						kw->bin_binmask, kw->binmask_length);
+				}
+			} else {
+				if (log) {
+					eprintf ("ap: Unsupported asm.arch and asm.bits\n");
+				}
 			}
 		}
 		if (log) {
@@ -880,7 +837,7 @@ R_API RList *r_core_get_boundaries_prot(RCore *core, int perm, const char *mode,
 		RAnalFunction *f = r_anal_get_fcn_in (core->anal, core->offset,
 			R_ANAL_FCN_TYPE_FCN | R_ANAL_FCN_TYPE_SYM);
 		if (f) {
-			ut64 from = f->addr, size = r_anal_fcn_size (f);
+			ut64 from = f->addr, size = r_anal_function_size_from_entry (f);
 
 			/* Search only inside the basic block */
 			if (!strcmp (mode, "anal.bb")) {
@@ -1074,7 +1031,7 @@ static RList *construct_rop_gadget(RCore *core, ut64 addr, ut8 *buf, int buflen,
 
 	if (grep) {
 		start = grep;
-		end = strstr (grep, ";");
+		end = strchr (grep, ';');
 		if (!end) { // We filter on a single opcode, so no ";"
 			end = start + strlen (grep);
 		}
@@ -1143,7 +1100,7 @@ static RList *construct_rop_gadget(RCore *core, ut64 addr, ut8 *buf, int buflen,
 		if (search_hit) {
 			if (end[0] == ';') { // fields are semicolon-separated
 				start = end + 1; // skip the ;
-				end = strstr (start, ";");
+				end = strchr (start, ';');
 				end = end? end: start + strlen (start); // latest field?
 				free (grep_str);
 				grep_str = calloc (1, end - start + 1);
@@ -2247,7 +2204,7 @@ static void do_asm_search(RCore *core, struct search_parameters *param, const ch
 	RIOMap *map;
 	bool regexp = input[1] == '/'; // "/c/"
 	bool everyByte = regexp && input[2] == 'a';
-	char *end_cmd = strstr (input, " ");
+	char *end_cmd = strchr (input, ' ');
 	switch ((end_cmd ? *(end_cmd - 1) : input[1])) {
 	case 'j':
 		param->outmode = R_MODE_JSON;
@@ -2437,8 +2394,8 @@ static void do_string_search(RCore *core, RInterval search_itv, struct search_pa
 					int delta = 0;
 					if (param->aes_search) {
 						delta = r_search_aes_update (core->search, at, buf, len);
-					} else if (param->rsa_search) {
-						delta = r_search_rsa_update (core->search, at, buf, len);
+					} else if (param->privkey_search) {
+						delta = r_search_privkey_update (core->search, at, buf, len);
 					}
 					if (delta != -1) {
 						int t = r_search_hit_new (core->search, &aeskw, at + delta);
@@ -2944,7 +2901,7 @@ static int cmd_search(void *data, const char *input) {
 		.inverse = false,
 		.crypto_search = false,
 		.aes_search = false,
-		.rsa_search = false,
+		.privkey_search = false,
 	};
 	if (!param.cmd_hit) {
 		param.cmd_hit = "";
@@ -3366,7 +3323,7 @@ reread:
 			param.aes_search = true;
 			break;
 		case 'r':
-			param.rsa_search = true;
+			param.privkey_search = true;
 			break;
 		default: {
 			dosearch = false;
@@ -3767,7 +3724,7 @@ reread:
 			if (input[1]) {
 				addr = r_num_math (core->num, input + 2);
 			} else {
-				RAnalFunction *fcn = r_anal_get_fcn_at (core->anal, addr, 0);
+				RAnalFunction *fcn = r_anal_get_function_at (core->anal, addr);
 				if (fcn) {
 					addr = fcn->addr;
 				} else {

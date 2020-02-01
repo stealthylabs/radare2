@@ -20,11 +20,21 @@ CAPSTONE_CFLAGS?=-g
 # CAPSTONE_MAKEFLAGS?=CAPSTONE_ARCHS="arm aarch64"
 
 GIT?=git
-ifeq ($(shell type wget && echo 1),1)
+ifeq ($(shell type wget 2> /dev/null && echo 1),1)
 WGET?=wget -c --no-check-certificate -O
 else
 WGET?=curl -o
 endif
+
+# NOTE: when you update TS_TIP or TS_BRA, also update them in shlr/meson.build
+TS_URL=https://github.com/tree-sitter/tree-sitter.git
+TS_BRA=master
+TS_TIP=aef62b4bc6b9654e54bd59bee1cb8cea16e3aa96
+
+# NOTE: when you update SHELLPARSER_TIP or SHELLPARSER_BRA, also update them in shlr/meson.build
+SHELLPARSER_URL=https://github.com/ret2libc/radare2-shell-parser.git
+SHELLPARSER_BRA=master
+SHELLPARSER_TIP=110a050947e85b963ef6ea718478dbfe1b840193
 
 ifeq ($(CS_RELEASE),1)
 CS_VER=4.0.1
@@ -37,11 +47,12 @@ CS_URL_BASE=github.com/aquynh/capstone
 CS_URL=$(GIT_PREFIX)$(CS_URL_BASE).git
 CS_ARCHIVE=https://$(CS_URL_BASE)/archive
 CS_UPD=20190515
+# NOTE: when you update CS_TIP or CS_BRA, also update them in shlr/meson.build
 ifeq ($(CS_NEXT),1)
-CS_TIP=5809774f62847e6755aa054746822ce32e369b3a
+CS_TIP=aaffb38c44fa58f510ba9b6264f7079bfbba4c8e
 CS_BRA=next
 else
-CS_TIP=c7d2b984af855ef9fbf8f8fd33ca7005da644b4a
+CS_TIP=c7fe0f8aaaa1bce78cb20491cd08470f570c4237
 CS_BRA=v4
 endif
 ifeq ($(CS_COMMIT_ARCHIVE),1)
@@ -49,15 +60,12 @@ CS_ARCHIVE_URL=$(CS_ARCHIVE)/$(CS_TIP).zip
 else
 CS_ARCHIVE_URL=
 endif
-# NOTE: when you update CS_TIP or CS_BRA, also update them in shlr/meson.build
-#CS_BRA=next
-#CS_TIP=38607453f3de85733f9604dffc27778db3b53766
 # REVERT THIS COMMIT BECAUSE ITS WRONG
 CS_REV=
 CS_PATCHES=1
 endif
 
-.PHONY: capstone-sync capstone-build all clean mrproper libgdbr libwindbg bochs
+.PHONY: capstone-sync capstone-build all clean mrproper libgdbr libwindbg bochs tree-sitter-sync radare2-shell-parser-sync
 
 HOST_CC?=gcc
 SHLR?=$(shell pwd)
@@ -74,7 +82,7 @@ endif
 ifeq (1,$(USE_PTRACE_WRAP))
 MODS+=ptrace-wrap
 endif
-SDB_URL=git://github.com/radare/sdb
+SDB_URL=git://github.com/radareorg/sdb
 #SDB_URL=/Users/pancake/prg/sdb
 SPP_URL=git://github.com/radare/spp
 PTRACE_WRAP_URL=git://github.com/thestr4ng3r/ptrace-wrap
@@ -89,7 +97,7 @@ all:
 	exit 1
 endif
 
-preall: targets libwindbg capstone-build bochs
+preall: targets libwindbg capstone-build tree-sitter-build radare2-shell-parser-build bochs
 	@for MOD in ${MODS} ; do \
 		echo $(MAKE) -C $$MOD ; \
 		$(MAKE) -C $$MOD HAVE_VALA= ROOT="${PWD}/../" CC="${CC}" ; \
@@ -319,6 +327,38 @@ ifeq ($(WITHOUT_PULL),1)
 	cd ../../radare2-webui/www/m && npm i ; $(MAKE) release
 else
 	cd ../../radare2-webui/www/m && git pull ; npm i ; $(MAKE) release
+endif
+
+ifeq ($(USE_TREESITTER),1)
+tree-sitter-build: tree-sitter/libtree-sitter.$(EXT_AR)
+
+tree-sitter/libtree-sitter.$(EXT_AR): tree-sitter/lib/src/lib.o
+	$(AR) rvs $@ $<
+	$(RANLIB) $@
+
+tree-sitter/lib/src/lib.o: tree-sitter-sync
+	$(CC) -std=c99 -c tree-sitter/lib/src/lib.c -o $@ -Itree-sitter/lib/include -Itree-sitter/lib/src $(CFLAGS)
+
+tree-sitter-sync:
+	"$(SHELL)" clone_3rd_repo.sh tree-sitter "${TS_URL}" "${TS_BRA}" "${TS_TIP}"
+
+radare2-shell-parser-build: radare2-shell-parser/libshell-parser.$(EXT_AR)
+
+radare2-shell-parser/libshell-parser.$(EXT_AR): radare2-shell-parser/src/parser.o
+	$(AR) rvs $@ $<
+	$(RANLIB) $@
+
+radare2-shell-parser/src/parser.o: radare2-shell-parser-sync
+	$(CC) -c radare2-shell-parser/src/parser.c -o $@ -Iradare2-shell-parser/src/tree_sitter -Itree-sitter/lib/include $(CFLAGS)
+
+radare2-shell-parser-sync: tree-sitter-sync
+	"$(SHELL)" clone_3rd_repo.sh radare2-shell-parser "${SHELLPARSER_URL}" "${SHELLPARSER_BRA}" "${SHELLPARSER_TIP}"
+
+SHLRS+=tree-sitter/libtree-sitter.a
+SHLRS+=radare2-shell-parser/libshell-parser.a
+else
+tree-sitter-build:
+radare2-shell-parser-build:
 endif
 
 www-sync-m sync-www-m: ../../radare2-webui/dist/m

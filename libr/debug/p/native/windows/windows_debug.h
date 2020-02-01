@@ -15,6 +15,7 @@
 #include <tlhelp32.h> // CreateToolhelp32Snapshot
 #include <psapi.h> // GetModuleFileNameEx, GetProcessImageFileName
 #include <tchar.h>
+#include <w32dbg_wrap.h>
 
 #ifndef XSTATE_GSSE
 #define XSTATE_GSSE 2
@@ -96,11 +97,6 @@ typedef struct _OBJECT_TYPE_INFORMATION {
 	ULONG NonPagedPoolUsage;
 } OBJECT_TYPE_INFORMATION, *POBJECT_TYPE_INFORMATION;
 
-typedef struct {
-	ut64 winbase;
-	PROCESS_INFORMATION pi;
-} RIOW32Dbg;
-
 // thread list
 typedef struct {
 	int pid;
@@ -153,9 +149,10 @@ int w32_reg_write(RDebug *dbg, int type, const ut8 *buf, int size);
 
 int w32_attach(RDebug *dbg, int pid);
 int w32_detach(RDebug *dbg, int pid);
+int w32_attach_new_process(RDebug* dbg, int pid);
 int w32_select(RDebug *dbg, int pid, int tid);
 int w32_kill(RDebug *dbg, int pid, int tid, int sig);
-void w32_break_process(RDebug *dbg);
+void w32_break_process(void *user);
 int w32_dbg_wait(RDebug *dbg, int pid);
 
 int w32_step(RDebug *dbg);

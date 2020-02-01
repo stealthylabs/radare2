@@ -180,14 +180,14 @@ static RList* sections(RBinFile *bf) {
 #else
 				int wordsize = 4;
 #endif
-				ptr->format = r_str_newf ("Cd %d[%d]", wordsize, section[i].size / wordsize);
+				ptr->format = r_str_newf ("Cd %d[%"PFMT64d"]", wordsize, section[i].size / wordsize);
 			} else if (strstr (ptr->name, ".rela.")) {
 #if R_BIN_ELF64
 				int wordsize = 8;
 #else
 				int wordsize = 4;
 #endif
-				ptr->format = r_str_newf ("Cd %d[%d]", wordsize, section[i].size / wordsize);
+				ptr->format = r_str_newf ("Cd %d[%"PFMT64d"]", wordsize, section[i].size / wordsize);
 			}
 			ptr->size = section[i].type != SHT_NOBITS ? section[i].size : 0;
 			ptr->vsize = section[i].size;
@@ -231,6 +231,7 @@ static RList* sections(RBinFile *bf) {
 				break;
 			case PT_LOAD:
 				ptr->name = r_str_newf ("LOAD%d", n++);
+				ptr->perm |= R_PERM_R;
 				found_load = 1;
 				ptr->add = true;
 				break;
@@ -503,10 +504,11 @@ static RList* symbols(RBinFile *bf) {
 		if (!symbol[i].size) {
 			continue;
 		}
-		ptr = Elf_(_r_bin_elf_convert_symbol) (bin, &symbol[i], "imp.%s");
+		ptr = Elf_(_r_bin_elf_convert_symbol) (bin, &symbol[i], "%s");
 		if (!ptr) {
 			break;
 		}
+		ptr->is_imported = true;
 		// special case where there is not entry in the plt for the import
 		if (ptr->vaddr == UT32_MAX) {
 			ptr->paddr = 0;
@@ -537,8 +539,8 @@ static RList* imports(RBinFile *bf) {
 			break;
 		}
 		ptr->name = strdup (import[i].name);
-		ptr->bind = r_str_const (import[i].bind);
-		ptr->type = r_str_const (import[i].type);
+		ptr->bind = import[i].bind;
+		ptr->type = import[i].type;
 		ptr->ordinal = import[i].ordinal;
 		setimpord (elf, ptr->ordinal, ptr);
 		r_list_append (ret, ptr);

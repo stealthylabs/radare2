@@ -52,6 +52,7 @@ int proc_pidpath(int pid, void * buffer, ut32 buffersize);
 # endif
 #endif
 #if __UNIX__
+# include <sys/utsname.h>
 # include <sys/wait.h>
 # include <sys/stat.h>
 # include <errno.h>
@@ -65,6 +66,7 @@ extern char **environ;
 #if __WINDOWS__
 # include <io.h>
 # include <winbase.h>
+# include <signal.h>
 #define TMP_BUFSIZE	4096
 #ifdef _MSC_VER
 #include <psapi.h>
@@ -141,6 +143,56 @@ R_API int r_sys_fork() {
 #endif
 }
 
+#if HAVE_SIGACTION
+R_API int r_sys_sigaction(int *sig, void (*handler) (int)) {
+	struct sigaction sigact = { };
+	int ret, i;
+
+	if (!sig) {
+		return -EINVAL;
+	}
+
+	sigact.sa_handler = handler;
+	sigemptyset (&sigact.sa_mask);
+
+	for (i = 0; sig[i] != 0; i++) {
+		sigaddset (&sigact.sa_mask, sig[i]);
+	}
+
+	for (i = 0; sig[i] != 0; i++) {
+		ret = sigaction (sig[i], &sigact, NULL);
+		if (ret) {
+			eprintf ("Failed to set signal handler for signal '%d': %s\n", sig[i], strerror(errno));
+			return ret;
+		}
+	}
+
+	return 0;
+}
+#else
+R_API int r_sys_sigaction(int *sig, void (*handler) (int)) {
+	int ret, i;
+
+	if (!sig) {
+		return -EINVAL;
+	}
+
+	for (i = 0; sig[i] != 0; i++) {
+		ret = signal (sig[i], handler);
+		if (ret == SIG_ERR) {
+			eprintf ("Failed to set signal handler for signal '%d': %s\n", sig[i], strerror(errno));
+			return -1;
+		}
+	}
+	return 0;
+}
+#endif
+
+R_API int r_sys_signal(int sig, void (*handler) (int)) {
+	int s[2] = { sig, 0 };
+	return r_sys_sigaction (s, handler);
+}
+
 R_API void r_sys_exit(int status, bool nocleanup) {
 	if (nocleanup) {
 		_exit (status);
@@ -186,40 +238,6 @@ R_API int r_sys_truncate(const char *file, int sz) {
 	}
 	return truncate (file, sz)? false: true;
 #endif
-}
-
-R_API os_info *r_sys_get_osinfo() {
-#if __WINDOWS__
-	return r_sys_get_winver();
-#endif
-	os_info *info = calloc (1, sizeof (os_info));
-	if (!info) {
-		return NULL;
-	}
-	int len = 0;
-	char *output = r_sys_cmd_str ("uname -s", NULL, &len);
-	if (len) {
-		strncpy (info->name, output, sizeof (info->name));
-		info->name[31] = '\0';
-	}
-	free (output);
-	output = r_sys_cmd_str ("uname -r", NULL, &len);
-	if (len) {
-		char *dot = strtok (output, ".");
-		if (dot) {
-			info->major = atoi (dot);
-		}
-		dot = strtok (NULL, ".");
-		if (dot) {
-			info->minor = atoi (dot);
-		}
-		dot = strtok (NULL, ".");
-		if (dot) {
-			info->patch = atoi (dot);
-		}
-	}
-	free (output);
-	return info;
 }
 
 R_API RList *r_sys_dir(const char *path) {
@@ -431,8 +449,9 @@ static int checkcmd(const char *c) {
 #endif
 
 R_API int r_sys_crash_handler(const char *cmd) {
-#if __UNIX__
-	struct sigaction sigact;
+#ifndef __WINDOWS__
+	int sig[] = { SIGINT, SIGSEGV, SIGBUS, SIGQUIT, SIGHUP, 0 };
+
 	if (!checkcmd (cmd)) {
 		return false;
 	}
@@ -444,24 +463,12 @@ R_API int r_sys_crash_handler(const char *cmd) {
 
 	free (crash_handler_cmd);
 	crash_handler_cmd = strdup (cmd);
-	sigact.sa_handler = signal_handler;
-	sigemptyset (&sigact.sa_mask);
-	sigact.sa_flags = 0;
-	sigaddset (&sigact.sa_mask, SIGINT);
-	sigaddset (&sigact.sa_mask, SIGSEGV);
-	sigaddset (&sigact.sa_mask, SIGBUS);
-	sigaddset (&sigact.sa_mask, SIGQUIT);
-	sigaddset (&sigact.sa_mask, SIGHUP);
 
-	sigaction (SIGINT, &sigact, (struct sigaction *)NULL);
-	sigaction (SIGSEGV, &sigact, (struct sigaction *)NULL);
-	sigaction (SIGBUS, &sigact, (struct sigaction *)NULL);
-	sigaction (SIGQUIT, &sigact, (struct sigaction *)NULL);
-	sigaction (SIGHUP, &sigact, (struct sigaction *)NULL);
-	return true;
+	r_sys_sigaction (sig, signal_handler);
 #else
-	return false;
+#pragma message ("r_sys_crash_handler : unimplemented for this platform")
 #endif
+	return true;
 }
 
 R_API char *r_sys_getenv(const char *key) {
@@ -653,7 +660,7 @@ R_API int r_sys_cmd_str_full(const char *cmd, const char *input, char **output, 
 			close (sh_in[1]);
 		}
 		// we should handle broken pipes somehow better
-		signal (SIGPIPE, SIG_IGN);
+		r_sys_signal (SIGPIPE, SIG_IGN);
 		for (;;) {
 			fd_set rfds, wfds;
 			int nfd;
@@ -1068,7 +1075,7 @@ R_API char *r_sys_pid_to_path(int pid) {
 	HANDLE processHandle;
 	const DWORD maxlength = MAX_PATH;
 	TCHAR filename[MAX_PATH];
-	const char *result;
+	char *result = NULL;
 
 	processHandle = OpenProcess (PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, pid);
 	if (!processHandle) {
@@ -1262,4 +1269,89 @@ R_API const char *r_sys_prefix(const char *pfx) {
 		prefix = strdup (pfx);
 	}
 	return prefix;
+}
+
+R_API RSysInfo *r_sys_info(void) {
+#if __UNIX__
+	struct utsname un = {{0}};
+	if (uname (&un) != -1) {
+		RSysInfo *si = R_NEW0 (RSysInfo);
+		if (si) {
+			si->sysname  = strdup (un.sysname);
+			si->nodename = strdup (un.nodename);
+			si->release  = strdup (un.release);
+			si->version  = strdup (un.version);
+			si->machine  = strdup (un.machine);
+			return si;
+		}
+	}
+#elif __WINDOWS__
+	HKEY key;
+	DWORD type;
+	DWORD size;
+	DWORD major;
+	DWORD minor;
+	char tmp[256] = {0};
+	RSysInfo *si = R_NEW0 (RSysInfo);
+	if (!si) {
+		return NULL;
+	}
+	
+	if (RegOpenKeyExA (HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion", 0,
+		KEY_QUERY_VALUE, &key) != ERROR_SUCCESS) {
+		r_sys_perror ("r_sys_info/RegOpenKeyExA");
+		r_sys_info_free (si);
+		return NULL;
+	}
+
+	size = sizeof (tmp);
+	if (RegQueryValueExA (key, "ProductName", NULL, &type,
+		(LPBYTE)&tmp, &size) != ERROR_SUCCESS
+		|| type != REG_SZ) {
+		goto beach;
+	}
+	si->sysname = strdup (tmp);
+
+	size = sizeof (major);
+	if (RegQueryValueExA (key, "CurrentMajorVersionNumber", NULL, &type,
+		(LPBYTE)&major, &size) != ERROR_SUCCESS
+		|| type != REG_DWORD) {
+		goto beach;
+	}
+	size = sizeof (minor);
+	if (RegQueryValueExA (key, "CurrentMinorVersionNumber", NULL, &type,
+		(LPBYTE)&minor, &size) != ERROR_SUCCESS
+		|| type != REG_DWORD) {
+		goto beach;
+	}
+
+	size = sizeof (tmp);
+	if (RegQueryValueExA (key, "CurrentBuild", NULL, &type,
+		(LPBYTE)&tmp, &size) != ERROR_SUCCESS
+		|| type != REG_SZ) {
+		goto beach;
+	}
+	si->version = r_str_newf ("%d.%d.%s", major, minor, tmp);
+
+	size = sizeof (tmp);
+	if (RegQueryValueExA (key, "ReleaseId", NULL, &type,
+		(LPBYTE)tmp, &size) != ERROR_SUCCESS
+		|| type != REG_SZ) {
+		goto beach;
+	}
+	si->release = strdup (tmp);
+beach:
+	RegCloseKey (key);
+	return si;
+#endif
+	return NULL;
+}
+
+R_API void r_sys_info_free(RSysInfo *si) {
+	free (si->sysname);
+	free (si->nodename);
+	free (si->release);
+	free (si->version);
+	free (si->machine);
+	free (si);
 }

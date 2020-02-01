@@ -133,6 +133,9 @@ static int prev_mode(int mode) {
 }
 
 static RGraphNode *agraph_get_title(const RAGraph *g, RANode *n, bool in) {
+	if (!n) {
+		return NULL;
+	}
 	if (n->title && *n->title) {
 		return n->gnode;
 	}
@@ -2092,6 +2095,8 @@ static char *get_body(RCore *core, ut64 addr, int size, int opts) {
 		r_str_trim (res);
 		res = r_str_trim_lines (res);
 		r_core_visual_toggle_decompiler_disasm (core, true, false);
+		r_config_hold_restore (hc);
+		r_config_hold_free (hc);
 		return res;
 	}
 	const char *cmd = (opts & BODY_SUMMARY)? "pds": "pD";
@@ -2317,7 +2322,7 @@ static int get_bbnodes(RAGraph *g, RCore *core, RAnalFunction *fcn) {
 			if (!curbb) {
 				curbb = bb;
 			}
-			if (r_anal_bb_is_in_offset (bb, core->offset)) {
+			if (r_anal_block_contains (bb, core->offset)) {
 				curbb = bb;
 				break;
 			}
@@ -3234,6 +3239,9 @@ static void agraph_follow_innodes (RAGraph *g, bool in) {
 	int count = 0;
 	RListIter *iter;
 	RANode *an = get_anode (g->curnode);
+	if (!an) {
+		return;
+	}
 	RGraphNode *gn = an->gnode;
 	const RList *list = in? an->gnode->in_nodes: an->gnode->out_nodes;
 	int nth = -1;
@@ -3550,7 +3558,7 @@ static int agraph_refresh(struct agraph_refresh_data *grd) {
 }
 
 static void agraph_refresh_oneshot(struct agraph_refresh_data *grd) {
-	r_core_task_enqueue_oneshot (grd->core, (RCoreTaskOneShot) agraph_refresh, grd);
+	r_core_task_enqueue_oneshot (&grd->core->tasks, (RCoreTaskOneShot) agraph_refresh, grd);
 }
 
 static void agraph_toggle_speed(RAGraph *g, RCore *core) {

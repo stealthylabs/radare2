@@ -51,7 +51,6 @@ endif
 r_io_deps = [
   r_util_dep,
   r_socket_dep,
-  sdb_dep,
   bochs_dep,
   gdb_dep,
   windbg_dep,
@@ -60,6 +59,10 @@ r_io_deps = [
   ar_dep,
   pth
 ]
+
+if host_machine.system() == 'windows'
+  r_io_deps += w32dbg_wrap_dep
+endif
 
 if host_machine.system() == 'linux'
   r_io_sources += [

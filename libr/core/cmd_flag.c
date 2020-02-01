@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2009-2019 - pancake */
+/* radare - LGPL - Copyright 2009-2020 - pancake */
 
 #include <stddef.h>
 #include "r_cons.h"
@@ -11,6 +11,7 @@ static const char *help_msg_f[] = {
 	"f."," [*[*]]","list local per-function flags (*) as r2 commands",
 	"f.","blah=$$+12","set local function label named 'blah'",
 	"f."," fname","list all local labels for the given function",
+	"f,","","table output for flags",
 	"f*","","list flags in r commands",
 	"f"," name 12 @ 33","set flag 'name' with length 12 at offset 33",
 	"f"," name = 33","alias for 'f name @ 33' or 'f name 1 33'",
@@ -420,6 +421,47 @@ static int flag_to_flag(RCore *core, const char *glob) {
 	return 0;
 }
 
+typedef struct {
+	RTable *t;
+} FlagTableData;
+
+static bool __tableItemCallback(RFlagItem *flag, void *user) {
+	FlagTableData *ftd = user;
+	if (!R_STR_ISEMPTY (flag->name)) {
+		RTable *t = ftd->t;
+		const char *spaceName = (flag->space && flag->space->name)? flag->space->name: "";
+		const char *addr = sdb_fmt ("0x%08"PFMT64x, flag->offset);
+		r_table_add_row (t, addr, sdb_fmt ("%d", flag->size), spaceName, flag->name, NULL);
+	}
+	return true;
+}
+
+static void cmd_flag_table(RCore *core, const char *input) {
+	const char fmt = *input++;
+	const char *q = input;
+	FlagTableData ftd = {0};
+	RTable *t = r_core_table (core);
+	ftd.t = t;
+	RTableColumnType *typeString = r_table_type ("string");
+	RTableColumnType *typeNumber = r_table_type ("number");
+	r_table_add_column (t, typeNumber, "addr", 0);
+	r_table_add_column (t, typeNumber, "size", 0);
+	r_table_add_column (t, typeString, "space", 0);
+	r_table_add_column (t, typeString, "name", 0);
+
+	RSpace *curSpace = r_flag_space_cur (core->flags);
+	r_flag_foreach_space (core->flags, curSpace, __tableItemCallback, &ftd);
+	if (r_table_query (t, q)) {
+		char *s = (fmt == 'j')
+			? r_table_tojson (t)
+			: r_table_tofancystring (t);
+		// char *s = r_table_tostring (t);
+		r_cons_printf ("%s\n", s);
+		free (s);
+	}
+	r_table_free (t);
+}
+
 static void cmd_flag_tags(RCore *core, const char *input) {
 	char mode = input[1];
 	for (; *input && !IS_WHITESPACE (*input); input++) {}
@@ -470,6 +512,7 @@ static void cmd_flag_tags(RCore *core, const char *input) {
 			r_cons_printf ("ft %s %s\n", tag, flags);
 		}
 		r_list_free (list);
+		free (inp);
 		return;
 	}
 	if (mode == 'j') { // "ftj"
@@ -486,9 +529,11 @@ static void cmd_flag_tags(RCore *core, const char *input) {
 				pj_s (pj, flg);
 			}
 			pj_end (pj);
+			r_list_free (flags);
 		}
 		pj_end (pj);
 		r_list_free (list);
+		free (inp);
 		r_cons_printf ("%s\n", pj_string (pj));
 		pj_free (pj);
 		return;
@@ -815,6 +860,18 @@ rep:
 		char* comment = NULL;
 		bool comment_needs_free = false;
 		ut32 bsze = 1; //core->blocksize;
+		int eqdir = 0;
+
+		if (eq && eq > cstr) {
+			char *prech = eq - 1;
+			if (*prech == '+') {
+				eqdir = 1;
+				*prech = 0;
+			} else if (*prech == '-') {
+				eqdir = -1;
+				*prech = 0;
+			}
+		}
 
 		// Get outta here as fast as we can so we can make sure that the comment
 		// buffer used on later code can be freed properly if necessary.
@@ -824,9 +881,14 @@ rep:
 		}
 		// Check base64 padding
 		if (eq && !(b64 && eq > b64 && (eq[1] == '\0' || (eq[1] == '=' && eq[2] == '\0')))) {
-			// TODO: add support for '=' char in non-base64 flag comments
 			*eq = 0;
-			off = r_num_math (core->num, eq + 1);
+			ut64 arg = r_num_math (core->num, eq + 1);
+			RFlagItem *item = r_flag_get (core->flags, cstr);
+			if (eqdir && item) {
+				off = item->offset + (arg * eqdir);
+			} else {
+				off = arg;
+			}
 		}
 		if (s) {
 			*s = '\0';
@@ -847,17 +909,7 @@ rep:
 					}
 				}
 			}
-#if 1
 			bsze = (s[1] == '=') ? 1 : r_num_math (core->num, s + 1);
-#else
-			if (*s && s[1]) {
-				if (s[1] != '=') {
-					bsze = r_num_math (core->num, s + 1);
-				} else {
-					bsze = 1;
-				}
-			}
-#endif
 		}
 
 		bool addFlag = true;
@@ -923,8 +975,8 @@ rep:
 				if (name) {
 					char *eq = strchr (name, '=');
 					if (eq) {
-						*eq ++ = 0;
-						off = r_num_math (core->num, eq);
+						*eq = 0;
+						off = r_num_math (core->num, eq + 1);
 					}
 					r_str_trim (name);
 					if (fcn) {
@@ -1020,6 +1072,9 @@ rep:
 		} else {
 			eprintf ("Missing arguments\n");
 		}
+		break;
+	case ',': // "f,"
+		cmd_flag_table (core, input);
 		break;
 	case 't': // "ft"
 		cmd_flag_tags (core, input);
@@ -1127,7 +1182,7 @@ rep:
 			}
 			fi = r_flag_get (core->flags, arg);
 			if (fi) {
-				ret = r_flag_color (core->flags, fi, color);
+				ret = r_flag_item_set_color (fi, color);
 				if (!color && ret)
 					r_cons_println (ret);
 			} else {
@@ -1235,30 +1290,51 @@ rep:
 	case '*': // "f*"
 	case 'j': // "fj"
 	case 'q': // "fq"
-		if (input[0] && input[1] == '.' && !input[2]) {
-			RFlagItem *item = r_flag_get_at (core->flags, core->offset, false);
-			if (item) {
-				switch (input[0]) {
+		if (input[0]) {
+			switch (input[1]) {
+			case 'j':
+			case 'q':
+			case 'n':
+			case '*':
+				input++;
+				break;
+			}
+		}
+		if (input[0] && input[1] == '.') {
+			const int mode = input[2];
+			const RList *list = r_flag_get_list (core->flags, core->offset);
+			PJ *pj = NULL;
+			if (mode == 'j') {
+				pj = pj_new ();
+				pj_a (pj);
+			}
+			RListIter *iter;
+			RFlagItem *item;
+			r_list_foreach (list, iter, item) {
+				switch (mode) {
 				case '*':
 					r_cons_printf ("f %s = 0x%08"PFMT64x"\n", item->name, item->offset);
 					break;
 				case 'j':
 					{
-						PJ *pj = pj_new ();
 						pj_o (pj);
 						pj_ks (pj, "name", item->name);
+						pj_ks (pj, "realname", item->realname);
 						pj_kn (pj, "offset", item->offset);
 						pj_kn (pj, "size", item->size);
 						pj_end (pj);
-						char *s = pj_drain (pj);
-						r_cons_printf ("%s\n", s);
-						free (s);
 					}
 					break;
 				default:
 					r_cons_printf ("%s\n", item->name);
 					break;
 				}
+			}
+			if (mode == 'j') {
+				pj_end (pj);
+				char *s = pj_drain (pj);
+				r_cons_printf ("%s\n", s);
+				free (s);
 			}
 		} else {
 			r_flag_list (core->flags, *input, input[0]? input + 1: "");

@@ -38,6 +38,7 @@ libsdb_sources = [
   'src/cdb.c',
   'src/cdb_make.c',
   'src/dict.c',
+  'src/diff.c',
   'src/disk.c',
   'src/fmt.c',
   'src/ht_uu.c',
@@ -118,7 +119,7 @@ pkgconfig_mod.generate(
   description: 'Simple DataBase',
   subdirs: ['sdb', '.'],
   version: sdb_version,
-  url: 'https://github.com/radare/sdb'
+  url: 'https://github.com/radareorg/sdb'
 )
 
 if not meson.is_subproject()

@@ -145,7 +145,7 @@ static void var_retype(RAnal *anal, RAnalVar *var, const char *vname, char *type
 static void get_src_regname(RCore *core, ut64 addr, char *regname, int size) {
 	RAnal *anal = core->anal;
 	RAnalOp *op = r_core_anal_op (core, addr, R_ANAL_OP_MASK_VAL | R_ANAL_OP_MASK_ESIL);
-	if (!op) {
+	if (!op || r_strbuf_is_empty (&op->esil)) {
 		return;
 	}
 	char *op_esil = strdup (r_strbuf_get (&op->esil));
@@ -177,29 +177,31 @@ static ut64 get_addr(Sdb *trace, const char *regname, int idx) {
 	return r_num_math (NULL, sdb_const_get (trace, query, 0));
 }
 
-static int cond_invert (int cond) {
-	int res = 0;
+static _RAnalCond cond_invert(RAnal *anal, _RAnalCond cond) {
 	switch (cond) {
 	case R_ANAL_COND_LE:
-		res = R_ANAL_COND_GT;
-		break;
+		return R_ANAL_COND_GT;
 	case R_ANAL_COND_LT:
-		res = R_ANAL_COND_GE;
-		break;
+		return R_ANAL_COND_GE;
 	case R_ANAL_COND_GE:
-		res = R_ANAL_COND_LT;
-		break;
+		return R_ANAL_COND_LT;
 	case R_ANAL_COND_GT:
-		res = R_ANAL_COND_LE;
+		return R_ANAL_COND_LE;
+	default:
+		if (anal->verbose) {
+			eprintf ("Unhandled conditional swap\n");
+		}
 		break;
 	}
-	return res;
+	return 0; // 0 is COND_ALways...
+	/* I haven't looked into it but I suspect that this might be confusing:
+	the opposite of any condition not in the list above is "always"? */
 }
 
 #define RKEY(a,k,d) sdb_fmt ("var.range.0x%"PFMT64x ".%c.%d", a, k, d)
 #define ADB a->sdb_fcns
 
-static void var_add_range (RAnal *a, RAnalVar *var, int cond, ut64 val) {
+static void var_add_range (RAnal *a, RAnalVar *var, _RAnalCond cond, ut64 val) {
 	const char *key = RKEY (var->addr, var->kind, var->delta);
 	sdb_array_append_num (ADB, key, cond, 0);
 	sdb_array_append_num (ADB, key, val, 0);
@@ -217,7 +219,7 @@ R_API RStrBuf *var_get_constraint (RAnal *a, RAnalVar *var) {
 	RStrBuf *sb = r_strbuf_new ("");
 
 	for (i = 0; i < n; i += 2) {
-		ut64 cond = sdb_array_get_num (ADB, key, i, 0);
+		_RAnalCond cond = sdb_array_get_num (ADB, key, i, 0);
 		ut64 val = sdb_array_get_num (ADB, key, i + 1, 0);
 		switch (cond) {
 		case R_ANAL_COND_LE:
@@ -241,6 +243,8 @@ R_API RStrBuf *var_get_constraint (RAnal *a, RAnalVar *var) {
 		case R_ANAL_COND_GT:
 			r_strbuf_append (sb, sdb_fmt ("> 0x%"PFMT64x "", val));
 			high = true;
+			break;
+		default:
 			break;
 		}
 		if (low && high && i != n-2) {
@@ -288,7 +292,7 @@ static RList *parse_format(RCore *core, char *fmt) {
 }
 
 #define DEFAULT_MAX 3
-#define REG_SZ 10
+#define REGNAME_SIZE 10
 #define MAX_INSTR 5
 
 static void type_match(RCore *core, ut64 addr, char *fcn_name, ut64 baddr, const char* cc,
@@ -308,10 +312,10 @@ static void type_match(RCore *core, ut64 addr, char *fcn_name, ut64 baddr, const
 	const char *place = r_anal_cc_arg (anal, cc, 0);
 	r_cons_break_push (NULL, NULL);
 
-	if (!strcmp (place, "stack_rev")) {
+	if (place && !strcmp (place, "stack_rev")) {
 		stack_rev = true;
 	}
-	if (!strncmp (place, "stack", 5)) {
+	if (place && !strncmp (place, "stack", 5)) {
 		in_stack = true;
 	}
 	if (verbose && !strncmp (fcn_name, "sym.imp.", 8)) {
@@ -344,7 +348,7 @@ static void type_match(RCore *core, ut64 addr, char *fcn_name, ut64 baddr, const
 			//XXX: param arg_num must be fixed to support floating point register
 			place = r_anal_cc_arg (anal, cc, arg_num);
 		}
-		char regname[REG_SZ] = {0};
+		char regname[REGNAME_SIZE] = {0};
 		ut64 xaddr = UT64_MAX;
 		bool memref = false;
 		bool cmt_set = false;
@@ -370,7 +374,7 @@ static void type_match(RCore *core, ut64 addr, char *fcn_name, ut64 baddr, const
 			const char *key = NULL;
 			RAnalVar *var = op->var;
 			if (!in_stack) {
-				key = sdb_fmt ("fcn.0x%08"PFMT64x".arg.%s", caddr, place);
+				key = sdb_fmt ("fcn.0x%08"PFMT64x".arg.%s", caddr, place? place: "");
 			} else {
 				key = sdb_fmt ("fcn.0x%08"PFMT64x".arg.%d", caddr, size);
 			}
@@ -386,11 +390,16 @@ static void type_match(RCore *core, ut64 addr, char *fcn_name, ut64 baddr, const
 					cmt_set = true;
 					if ((op->ptr && op->ptr != UT64_MAX) && !strcmp (name, "format")) {
 						RFlagItem *f = r_flag_get_i (core->flags, op->ptr);
-						if (f && !strncmp (f->name, "str", 3)) {
-							if ((types = parse_format (core, f->realname))) {
-								max += r_list_length (types);
+						if (f && f->space && !strcmp (f->space->name, R_FLAGS_FS_STRINGS)) {
+							char formatstr[0x200];
+							int read = r_io_nread_at (core->io, f->offset, (ut8 *)formatstr, R_MIN (sizeof (formatstr) - 1, f->size));
+							if (read > 0) {
+								formatstr[read] = '\0';
+								if ((types = parse_format (core, formatstr))) {
+									max += r_list_length (types);
+								}
+								format = true;
 							}
-							format = true;
 						}
 					}
 				}
@@ -432,7 +441,7 @@ static void type_match(RCore *core, ut64 addr, char *fcn_name, ut64 baddr, const
 					}
 				}
 			} else if (var && res && xaddr && (xaddr != UT64_MAX)) { // Type progation using value
-				char tmp[REG_SZ] = {0};
+				char tmp[REGNAME_SIZE] = {0};
 				get_src_regname (core, instr_addr, tmp, sizeof (tmp));
 				ut64 ptr = get_addr (trace, tmp, j);
 				if (ptr == xaddr) {
@@ -447,6 +456,11 @@ static void type_match(RCore *core, ut64 addr, char *fcn_name, ut64 baddr, const
 	}
 	r_list_free (types);
 	r_cons_break_pop ();
+}
+
+static int bb_cmpaddr(const void *_a, const void *_b) {
+	const RAnalBlock *a = _a, *b = _b;
+	return a->addr > b->addr ? 1 : (a->addr < b->addr ? -1 : 0);
 }
 
 R_API void r_core_anal_type_match(RCore *core, RAnalFunction *fcn) {
@@ -499,6 +513,7 @@ R_API void r_core_anal_type_match(RCore *core, RAnalFunction *fcn) {
 		return;
 	}
 	r_cons_break_push (NULL, NULL);
+	r_list_sort (fcn->bbs, bb_cmpaddr); // TODO: The algorithm can be more accurate if blocks are followed by their jmp/fail, not just by address
 	r_list_foreach (fcn->bbs, it, bb) {
 		ut64 addr = bb->addr;
 		int i = 0;
@@ -552,7 +567,7 @@ R_API void r_core_anal_type_match(RCore *core, RAnalFunction *fcn) {
 					}
 				} else if (aop.ptr != UT64_MAX) {
 					RFlagItem *flag = r_flag_get_i (core->flags, aop.ptr);
-					if (flag && r_str_startswith (flag->realname, "imp.")) {
+					if (flag && flag->space && flag->space->name && !strcmp (flag->space->name, R_FLAGS_FS_IMPORTS) && flag->realname) {
 						full_name = flag->realname;
 						callee_addr = aop.ptr;
 					}
@@ -602,7 +617,7 @@ R_API void r_core_anal_type_match(RCore *core, RAnalFunction *fcn) {
 				}
 			} else if (!resolved && ret_type && ret_reg) {
 				// Forward propgation of function return type
-				char src[REG_SZ] = {0};
+				char src[REGNAME_SIZE] = {0};
 				const char *query = sdb_fmt ("%d.reg.write", cur_idx);
 				char *cur_dest = sdb_get (trace, query, 0);
 				get_src_regname (core, aop.addr, src, sizeof (src));
@@ -629,7 +644,7 @@ R_API void r_core_anal_type_match(RCore *core, RAnalFunction *fcn) {
 						// Progate return type passed using pointer
 						// int *ret; *ret = strlen(s);
 						// TODO: memref check , dest and next src match
-						char nsrc[REG_SZ] = {0};
+						char nsrc[REGNAME_SIZE] = {0};
 						get_src_regname (core, next_op->addr, nsrc, sizeof (nsrc));
 						if (ret_reg && *nsrc && strstr (ret_reg, nsrc) && var &&
 								aop.direction == R_ANAL_OP_DIR_READ) {
@@ -658,7 +673,7 @@ R_API void r_core_anal_type_match(RCore *core, RAnalFunction *fcn) {
 				// lea rax , str.hello  ; mov [local_ch], rax;
 				// mov rdx , [local_4h] ; mov [local_8h], rdx;
 				if (prev_dest && (type == R_ANAL_OP_TYPE_MOV || type == R_ANAL_OP_TYPE_STORE)) {
-					char reg[REG_SZ] = {0};
+					char reg[REGNAME_SIZE] = {0};
 					get_src_regname (core, addr, reg, sizeof (reg));
 					bool match = strstr (prev_dest, reg)? true: false;
 					if (str_flag && match) {
@@ -681,7 +696,7 @@ R_API void r_core_anal_type_match(RCore *core, RAnalFunction *fcn) {
 						if (!jmp_op) {
 							break;
 						}
-						if ((jmp_op->type == R_ANAL_OP_TYPE_RET && r_anal_bb_is_in_offset (jmpbb, jmp_addr))
+						if ((jmp_op->type == R_ANAL_OP_TYPE_RET && r_anal_block_contains (jmpbb, jmp_addr))
 								|| jmp_op->type == R_ANAL_OP_TYPE_CJMP) {
 							jmp = true;
 							r_anal_op_free (jmp_op);
@@ -690,7 +705,7 @@ R_API void r_core_anal_type_match(RCore *core, RAnalFunction *fcn) {
 						jmp_addr += jmp_op->size;
 						r_anal_op_free (jmp_op);
 					}
-					int cond = jmp? cond_invert (next_op->cond): next_op->cond;
+					_RAnalCond cond = jmp? cond_invert (anal, next_op->cond): next_op->cond;
 					var_add_range (anal, var, cond, aop.val);
 				}
 			}

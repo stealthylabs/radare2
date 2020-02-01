@@ -1925,6 +1925,9 @@ static void op0_memimmhandle(RAnalOp *op, cs_insn *insn, ut64 addr, int regsz) {
 	case X86_OP_MEM:
 		op->cycles = CYCLE_MEM;
 		op->disp = INSOP(0).mem.disp;
+		if (!op->disp) {
+			op->disp = UT64_MAX;
+		}
 		op->refptr = INSOP(0).size;
 		if (INSOP(0).mem.base == X86_REG_RIP) {
 			op->ptr = addr + insn->size + op->disp;
@@ -2093,6 +2096,12 @@ static void anop(RAnal *a, RAnalOp *op, ut64 addr, const ut8 *buf, int len, csh 
 	case X86_INS_FUCOMP:
 	case X86_INS_FUCOM:
 		op->family = R_ANAL_OP_FAMILY_FPU;
+		op->type = R_ANAL_OP_TYPE_CMP;
+		break;
+	case X86_INS_BT:
+	case X86_INS_BTC:
+	case X86_INS_BTR:
+	case X86_INS_BTS:
 		op->type = R_ANAL_OP_TYPE_CMP;
 		break;
 	case X86_INS_FABS:
@@ -3254,7 +3263,10 @@ static char *get_reg_profile(RAnal *anal) {
 		"drx	dr7	.32	28	0\n";
 		 break;
 	case 64:
-		 p =
+	{
+		const char *cc = r_anal_cc_default (anal);
+		const char *args_prof = cc && !strcmp (cc, "ms")
+		? // Microsoft x64 CC
 		"# RAX     return value\n"
 		"# RCX     argument 1\n"
 		"# RDX     argument 2\n"
@@ -3268,6 +3280,15 @@ static char *get_reg_profile(RAnal *anal) {
 		 "=PC	rip\n"
 		 "=SP	rsp\n"
 		 "=BP	rbp\n"
+		 "=A0	rcx\n"
+		 "=A1	rdx\n"
+		 "=A2	r8\n"
+		 "=A3	r9\n"
+		 "=SN	rax\n"
+		 : // System V AMD64 ABI
+		 "=PC	rip\n"
+		 "=SP	rsp\n"
+		 "=BP	rbp\n"
 		 "=A0	rdi\n"
 		 "=A1	rsi\n"
 		 "=A2	rdx\n"
@@ -3276,7 +3297,8 @@ static char *get_reg_profile(RAnal *anal) {
 		 "=A5	r9\n"
 		 "=A6	r10\n"
 		 "=A7	r11\n"
-		 "=SN	rax\n"
+		 "=SN	rax\n";
+		char *prof = r_str_newf ("%s%s", args_prof,
 		 "gpr	rax	.64	80	0\n"
 		 "gpr	eax	.32	80	0\n"
 		 "gpr	ax	.16	80	0\n"
@@ -3441,8 +3463,9 @@ static char *get_reg_profile(RAnal *anal) {
 		 "fpu    xmm7  .64 272  4\n"
 		 "fpu    xmm7h .64 272  0\n"
 		 "fpu    xmm7l .64 280  0\n"
-		 "fpu    x64   .64 288  0\n";
-		 break;
+		 "fpu    x64   .64 288  0\n");
+		return prof;
+	}
 #if 0
 	default: p= /* XXX */
 		 "=PC	rip\n"
@@ -3525,6 +3548,27 @@ static int archinfo(RAnal *anal, int q) {
 	return 0;
 }
 
+static RList *anal_preludes(RAnal *anal) {
+#define KW(d,ds,m,ms) r_list_append (l, r_search_keyword_new((const ut8*)d,ds,(const ut8*)m, ms, NULL))
+	RList *l = r_list_newf ((RListFree)r_search_keyword_free);
+	switch (anal->bits) {
+	case 32:
+		KW ("\x8b\xff\x55\x8b\xec", 5, NULL, 0);
+		KW ("\x55\x89\xe5", 3, NULL, 0);
+		KW ("\x55\x8b\xec", 3, NULL, 0);
+		break;
+	case 64:
+		KW ("\x55\x48\x89\xe5", 4, NULL, 0);
+		KW ("\x55\x48\x8b\xec", 4, NULL, 0);
+		break;
+	default:
+		r_list_free (l);
+		l = NULL;
+		break;
+	}
+	return l;
+}
+
 RAnalPlugin r_anal_plugin_x86_cs = {
 	.name = "x86",
 	.desc = "Capstone X86 analysis",
@@ -3533,6 +3577,7 @@ RAnalPlugin r_anal_plugin_x86_cs = {
 	.arch = "x86",
 	.bits = 16|32|64,
 	.op = &analop,
+	.preludes = anal_preludes,
 	.archinfo = archinfo,
 	.get_reg_profile = &get_reg_profile,
 	.init = init,

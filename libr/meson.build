@@ -27,6 +27,7 @@ anal_plugins = [
   'msp430',
   'nios2',
   'null',
+  'or1k',
   'pic',
   'ppc_cs',
   'ppc_gnu',
@@ -89,6 +90,7 @@ asm_plugins = [
   'mips_gnu',
   'msp430',
   'nios2',
+  'or1k',
   'pic',
   'ppc_cs',
   'ppc_gnu',
@@ -136,6 +138,7 @@ bin_plugins = [
   'elf64',
   'fs',
   'java',
+  'le',
   'mach0',
   'mach064',
   'mbn',
@@ -156,6 +159,7 @@ bin_plugins = [
   'pe',
   'pe64',
   'pebble',
+  'prg',
   'psxexe',
   'sfc',
   'smd',
@@ -177,6 +181,7 @@ bin_ldr_plugins = [
 bin_xtr_plugins = [
   'xtr_dyldcache',
   'xtr_fatmach0',
+  'xtr_sep64',
 ]
 
 bp_plugins = [
@@ -321,7 +326,6 @@ parse_plugins = [
 include_files =[
   'include/r2naked.h',
   'include/r_agraph.h',
-  'include/r_anal_ex.h',
   'include/r_anal.h',
   'include/r_asm.h',
   'include/r_bind.h',
@@ -376,6 +380,7 @@ r_util_files = [
   'include/r_util/r_ascii_table.h',
   'include/r_util/r_asn1.h',
   'include/r_util/r_assert.h',
+  'include/r_util/r_protobuf.h',
   'include/r_util/r_base64.h',
   'include/r_util/r_base91.h',
   'include/r_util/r_big.h',
@@ -404,6 +409,7 @@ r_util_files = [
   'include/r_util/r_queue.h',
   'include/r_util/r_range.h',
   'include/r_util/r_rbtree.h',
+  'include/r_util/r_intervaltree.h',
   'include/r_util/r_sandbox.h',
   'include/r_util/r_signal.h',
   'include/r_util/r_spaces.h',
@@ -411,6 +417,7 @@ r_util_files = [
   'include/r_util/r_strbuf.h',
   'include/r_util/r_str.h',
   'include/r_util/r_strpool.h',
+  'include/r_util/r_str_constpool.h',
   'include/r_util/r_str_util.h',
   'include/r_util/r_sys.h',
   'include/r_util/r_alloc.h',

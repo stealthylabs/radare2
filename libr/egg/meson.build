@@ -16,12 +16,11 @@ r_egg_sources = [
 
 r_egg = library('r_egg', r_egg_sources,
   include_directories: [platform_inc],
-  c_args: library_cflags,
+  c_args: library_cflags + ['-DR_EGG_SRC=1'],
   dependencies: [
     r_util_dep,
     r_asm_dep,
     r_syscall_dep,
-    sdb_dep,
     mpc_dep
   ],
   install: true,

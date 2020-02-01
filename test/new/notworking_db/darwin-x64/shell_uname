@@ -1,0 +1,12 @@
+NAME='uname'
+FILE=-
+ARGS=
+BROKEN=
+CMDS=<<EOF
+!uname
+EOF
+EXPECT=<<EOF
+Darwin
+EOF
+RUN
+

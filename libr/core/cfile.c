@@ -109,7 +109,10 @@ R_API int r_core_file_reopen(RCore *core, const char *args, int perm, int loadbi
 			newtid = newpid;
 #endif
 		}
-		//reopen and attach
+		// Reset previous pid and tid
+		core->dbg->pid = -1;
+		core->dbg->tid = -1;
+		// Reopen and attach
 		r_core_setup_debugger (core, "native", true);
 		r_debug_select (core->dbg, newpid, newtid);
 	}
@@ -117,8 +120,8 @@ R_API int r_core_file_reopen(RCore *core, const char *args, int perm, int loadbi
 	if (file) {
 		bool had_rbin_info = false;
 
-		if (ofile) {
-			if (r_bin_file_delete (core->bin, ofile->fd)) {
+		if (ofile && bf) {
+			if (r_bin_file_delete (core->bin, bf->id)) {
 				had_rbin_info = true;
 			}
 		}
@@ -208,6 +211,14 @@ R_API void r_core_sysenv_end(RCore *core, const char *cmd) {
 	r_sys_setenv ("R2_FILE", NULL);
 	r_sys_setenv ("R2_BYTES", NULL);
 	r_sys_setenv ("R2_OFFSET", NULL);
+
+	// remove temporary R2_CONFIG file
+	char *r2_config = r_sys_getenv ("R2_CONFIG");
+	if (r2_config) {
+		r_file_rm (r2_config);
+		r_sys_setenv ("R2_CONFIG", NULL);
+		free (r2_config);
+	}
 }
 
 #if DISCUSS
@@ -238,21 +249,36 @@ R_API char *r_core_sysenv_begin(RCore * core, const char *cmd) {
 			}
 		}
 	}
-	r_sys_setenv ("RABIN2_LANG", r_config_get (core->config, "bin.lang"));
-	r_sys_setenv ("RABIN2_DEMANGLE", r_config_get (core->config, "bin.demangle"));
 	r_sys_setenv ("R2_OFFSET", sdb_fmt ("%"PFMT64d, core->offset));
 	r_sys_setenv ("R2_XOFFSET", sdb_fmt ("0x%08"PFMT64x, core->offset));
 	r_sys_setenv ("R2_ENDIAN", core->assembler->big_endian? "big": "little");
 	r_sys_setenv ("R2_BSIZE", sdb_fmt ("%d", core->blocksize));
+
+	// dump current config file so other r2 tools can use the same options
+	char *config_sdb_path = NULL;
+	int config_sdb_fd = r_file_mkstemp (NULL, &config_sdb_path);
+	if (config_sdb_fd >= 0) {
+		close (config_sdb_fd);
+	}
+
+	Sdb *config_sdb = sdb_new (NULL, config_sdb_path, 0);
+	r_config_serialize (core->config, config_sdb);
+	sdb_sync (config_sdb);
+	sdb_free (config_sdb);
+	r_sys_setenv ("R2_CONFIG", config_sdb_path);
+
+	r_sys_setenv ("RABIN2_LANG", r_config_get (core->config, "bin.lang"));
+	r_sys_setenv ("RABIN2_DEMANGLE", r_config_get (core->config, "bin.demangle"));
 	r_sys_setenv ("R2_ARCH", r_config_get (core->config, "asm.arch"));
 	r_sys_setenv ("R2_BITS", sdb_fmt ("%d", r_config_get_i (core->config, "asm.bits")));
 	r_sys_setenv ("R2_COLOR", r_config_get_i (core->config, "scr.color")? "1": "0");
 	r_sys_setenv ("R2_DEBUG", r_config_get_i (core->config, "cfg.debug")? "1": "0");
 	r_sys_setenv ("R2_IOVA", r_config_get_i (core->config, "io.va")? "1": "0");
+	free (config_sdb_path);
 	return ret;
 }
 
-#if !__linux__
+#if !__linux__ && !__WINDOWS__
 static ut64 get_base_from_maps(RCore *core, const char *file) {
 	RDebugMap *map;
 	RListIter *iter;
@@ -717,7 +743,7 @@ R_API bool r_core_bin_load(RCore *r, const char *filenameuri, ut64 baddr) {
 			// PLT finding
 			RFlagItem *impsym = r_flag_get (r->flags, sdb_fmt ("sym.imp.%s", imp->name));
 			if (!impsym) {
-				eprintf ("Cannot find '%s' import in the PLT\n", imp->name);
+				//eprintf ("Cannot find '%s' import in the PLT\n", imp->name);
 				continue;
 			}
 			ut64 imp_addr = impsym->offset;
@@ -850,6 +876,9 @@ R_API RCoreFile *r_core_file_open(RCore *r, const char *file, int flags, ut64 lo
 	}
 	r->io->bits = r->assembler->bits; // TODO: we need an api for this
 	RIODesc *fd = r_io_open_nomap (r->io, file, flags, 0644);
+	if (r_cons_is_breaked()) {
+		goto beach;
+	}
 	if (!fd && openmany) {
 		// XXX - make this an actual option somewhere?
 		fh = r_core_file_open_many (r, file, flags, loadaddr);
@@ -907,6 +936,14 @@ R_API RCoreFile *r_core_file_open(RCore *r, const char *file, int flags, ut64 lo
 			swstep = false;
 		}
 		r_config_set_i (r->config, "dbg.swstep", swstep);
+		// Set the correct debug handle
+		if (fd->plugin && fd->plugin->isdbg) {
+			char *dh = r_str_ndup (file, (strstr (file, "://") - file));
+			if (dh) {
+				r_debug_use (r->dbg, dh);
+				free (dh);
+			}
+		}
 	}
 	//used by r_core_bin_load otherwise won't load correctly
 	//this should be argument of r_core_bin_load <shrug>

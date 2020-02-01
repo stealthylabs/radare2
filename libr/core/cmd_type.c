@@ -759,7 +759,7 @@ static void typesList(RCore *core, int mode) {
 	}
 }
 
-static void set_offset_hint(RCore *core, RAnalOp op, const char *type, ut64 laddr, ut64 at, int offimm) {
+static void set_offset_hint(RCore *core, RAnalOp *op, const char *type, ut64 laddr, ut64 at, int offimm) {
 	char *res = r_type_get_struct_memb (core->anal->sdb_types, type, offimm);
 	const char *cmt = ((offimm == 0) && res)? res: type;
 	if (offimm > 0) {
@@ -768,7 +768,7 @@ static void set_offset_hint(RCore *core, RAnalOp op, const char *type, ut64 ladd
 		if (res && sdb_const_get (core->anal->sdb_types, query, 0)) {
 			r_anal_hint_set_offset (core->anal, at, res);
 		}
-	} else if (cmt && r_anal_op_ismemref (op.type)) {
+	} else if (cmt && r_anal_op_ismemref (op->type)) {
 			r_meta_set_string (core->anal, R_META_TYPE_VARTYPE, at, cmt);
 	}
 }
@@ -879,6 +879,7 @@ R_API void r_core_link_stroff(RCore *core, RAnalFunction *fcn) {
 	r_config_set_i (core->config, "dbg.follow", 0);
 	ut64 oldoff = core->offset;
 	r_cons_break_push (NULL, NULL);
+	r_list_sort (fcn->bbs, bb_cmpaddr); // TODO: The algorithm can be more accurate if blocks are followed by their jmp/fail, not just by address
 	r_list_foreach (fcn->bbs, it, bb) {
 		ut64 at = bb->addr;
 		ut64 to = bb->addr + bb->size;
@@ -943,9 +944,9 @@ R_API void r_core_link_stroff(RCore *core, RAnalFunction *fcn) {
 							var->kind, var->name, vlink, false);
 				}
 			} else if (slink) {
-				set_offset_hint (core, aop, slink, src_addr, at - ret, src_imm);
+				set_offset_hint (core, &aop, slink, src_addr, at - ret, src_imm);
 			} else if (dlink) {
-				set_offset_hint (core, aop, dlink, dst_addr, at - ret, dst_imm);
+				set_offset_hint (core, &aop, dlink, dst_addr, at - ret, dst_imm);
 			}
 			if (r_anal_op_nonlinear (aop.type)) {
 				r_reg_set_value (esil->anal->reg, pc, at);
@@ -1368,7 +1369,7 @@ static int cmd_type(void *data, const char *input) {
 		switch (input[1]) {
 		case '.': // "tx." type xrefs 
 		case 'f': // "txf" type xrefs 
-			fcn  = r_anal_get_fcn_at (core->anal, core->offset, 0);
+			fcn  = r_anal_get_function_at (core->anal, core->offset);
 			if (fcn) {
 				RList *uniq = r_anal_types_from_fcn (core->anal, fcn);
 				r_list_foreach (uniq , iter , type) {

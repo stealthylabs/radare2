@@ -49,8 +49,17 @@ R_API ut64 r_reg_get_value_big(RReg *reg, RRegItem *item, utX *val) {
 		}
 		ret = val->v128.Low;
 		break;
-	//case 256:// qword + qword + qword + qword
-	//	break;
+	case 256:// qword + qword + qword + qword
+		if (regset->arena->bytes && (off + 32 <= regset->arena->size)) {
+			val->v256.Low.Low = *((ut64 *)(regset->arena->bytes + off));
+			val->v256.Low.High = *((ut64 *)(regset->arena->bytes + off + 8));
+			val->v256.High.Low = *((ut64 *)(regset->arena->bytes + off + 16));
+			val->v256.High.High = *((ut64 *)(regset->arena->bytes + off + 24));
+		} else {
+			eprintf ("r_reg_get_value: null or oob arena for current regset\n");
+		}
+		ret = val->v256.Low.Low;
+		break;
 	default:
 		eprintf ("r_reg_get_value_big: Bit size %d not supported\n", item->size);
 		break;
@@ -70,7 +79,7 @@ R_API ut64 r_reg_get_value(RReg *reg, RRegItem *item) {
 	switch (item->size) {
 	case 1: {
 		int offset = item->offset / 8;
-		if (offset + item->size >= regset->arena->size) {
+		if (offset >= regset->arena->size) {
 			break;
 		}
 		return (regset->arena->bytes[offset] &
@@ -237,19 +246,24 @@ R_API R_HEAP char *r_reg_get_bvalue(RReg *reg, RRegItem *item) {
 /* packed registers */
 // packbits can be 8, 16, 32 or 64
 // result value is always casted into ut64
-// TODO: use item->packed_size
+// TODO: support packbits=128 for xmm registers
 R_API ut64 r_reg_get_pack(RReg *reg, RRegItem *item, int packidx, int packbits) {
-	ut64 ret = 0LL;
-	if (!reg || !item) {
-		return 0LL;
-	}
+	r_return_val_if_fail (reg && item, 0LL);
+
 	if (packbits < 1) {
 		packbits = item->packed_size;
 	}
+	packbits = R_MIN (64, R_MAX (0, packbits));
+
+	ut64 ret = 0LL;
 	const int packbytes = packbits / 8;
 	const int packmod = packbits % 8;
 	if (packmod) {
 		eprintf ("Invalid bit size for packet register\n");
+		return 0LL;
+	}
+	if (packidx * packbits > item->size) {
+		eprintf ("Packed index is beyond the register size\n");
 		return 0LL;
 	}
 	RRegSet *regset = &reg->regset[item->arena];
@@ -264,29 +278,25 @@ R_API ut64 r_reg_get_pack(RReg *reg, RRegItem *item, int packidx, int packbits) 
 	return ret;
 }
 
+// TODO: support packbits=128 for xmm registers
 R_API int r_reg_set_pack(RReg *reg, RRegItem *item, int packidx, int packbits, ut64 val) {
-	r_return_val_if_fail (reg && item, false);
+	r_return_val_if_fail (reg && reg->regset->arena && item, false);
 
-	if (!reg->regset->arena) {
-		return 0LL;
-	}
 	if (packbits < 1) {
 		packbits = item->packed_size;
 	}
+	packbits = R_MIN (64, R_MAX (0, packbits));
+
 	int packbytes = packbits / 8;
-	int packmod = packbits % 8;
 	if (packidx * packbits > item->size) {
 		eprintf ("Packed index is beyond the register size\n");
 		return false;
 	}
-	if (packmod) {
-		eprintf ("Invalid bit size for packet register\n");
-		return false;
-	}
-	int off = item->offset;
+	int off = BITS2BYTES (item->offset);
+	off += (packidx * packbytes);
 	if (reg->regset[item->arena].arena->size - BITS2BYTES (off) - BITS2BYTES (packbytes) >= 0) {
-		ut8 *dst = reg->regset[item->arena].arena->bytes + BITS2BYTES (off);
-		r_mem_copybits (dst, (ut8 *)&val, packbytes);
+		ut8 *dst = reg->regset[item->arena].arena->bytes + off;
+		memcpy (dst, (ut8*)&val, packbytes);
 		return true;
 	}
 	eprintf ("r_reg_set_value: Cannot set %s to 0x%" PFMT64x "\n", item->name, val);

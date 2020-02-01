@@ -93,7 +93,7 @@ R_API char *r_lib_path(const char *libname) {
 	}
 	WCHAR *name = r_utf8_to_utf16 (tmp);
 	free (tmp);
-	char *path = NULL;
+	WCHAR *path = NULL;
 	if (!name) {
 		goto err;
 	}
@@ -103,7 +103,7 @@ R_API char *r_lib_path(const char *libname) {
 		r_sys_perror ("SearchPath");
 		goto err;
 	}
-	path = malloc (count * sizeof (TCHAR));
+	path = malloc (count * sizeof (WCHAR));
 	if (!path) {
 		goto err;
 	}
@@ -113,11 +113,12 @@ R_API char *r_lib_path(const char *libname) {
 		goto err;
 	}
 	tmp = r_utf16_to_utf8 (path);
+	free (name);
 	free (path);
-	path = tmp;
+	return tmp;
 err:
 	free (name);
-	return path;
+	return NULL;
 #else
 #if __APPLE__
 	char *env = r_sys_getenv ("DYLD_LIBRARY_PATH");
@@ -172,6 +173,7 @@ R_API void r_lib_free(RLib *lib) {
 		r_list_free (lib->handlers);
 		r_list_free (lib->plugins);
 		free (lib->symname);
+		free (lib->symnamefunc);
 		free (lib);
 	}
 }
@@ -301,6 +303,15 @@ R_API int r_lib_open_ptr(RLib *lib, const char *file, void *handler, RLibStruct 
 		if (strcmp (stru->version, R2_VERSION)) {
 			eprintf ("Module version mismatch %s (%s) vs (%s)\n",
 				file, stru->version, R2_VERSION);
+			if (stru->pkgname) {
+				const char *dot = strchr (stru->version, '.');
+				int major = atoi (stru->version);
+				int minor = dot ? atoi (dot + 1) : 0;
+				// The pkgname member was introduced in 4.2.0
+				if (major > 4 || (major == 4 && minor >= 2)) {
+					printf ("r2pm -ci %s\n", stru->pkgname);
+				}
+			}
 			return -1;
 		}
 	}

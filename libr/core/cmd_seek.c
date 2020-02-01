@@ -73,7 +73,8 @@ static void __init_seek_line(RCore *core) {
 
 	r_config_bump (core->config, "lines.to");
 	from = r_config_get_i (core->config, "lines.from");
-	to = r_config_get_i (core->config, "lines.to");
+	const char *to_str = r_config_get (core->config, "lines.to");
+	to = r_num_math (core->num, (to_str && *to_str) ? to_str : "$s");
 	if (r_core_lines_initcache (core, from, to) == -1) {
 		eprintf ("ERROR: \"lines.from\" and \"lines.to\" must be set\n");
 	}
@@ -548,18 +549,25 @@ static int cmd_seek(void *data, const char *input) {
 				}
 				r_list_free (list);
 			}
-			r_cons_printf ("[");
+			PJ *pj = pj_new ();
+			pj_a (pj);
 			for (i = 0; i < lsz; ++i) {
 				ut64 *addr = r_list_get_n (addrs, i);
 				const char *name = r_list_get_n (names, i);
-				// XXX(should the "name" field be optional? That might make
-				// a bit more sense.
-				r_cons_printf ("{\"offset\":%"PFMT64d",\"symbol\":\"%s\"}", *addr, name);
-				if (i != lsz - 1) {
-					r_cons_printf (",");
+				pj_o (pj);
+				pj_kn (pj, "offset", *addr);
+				if (name && *name) {
+					pj_ks (pj, "name", name);
 				}
+				if (core->io->undo.undos == i) {
+					pj_kb (pj, "current", true);
+				}
+				pj_end (pj);
 			}
-			r_cons_printf ("]\n");
+			pj_end (pj);
+			char *s = pj_drain (pj);
+			r_cons_printf ("%s\n", s);
+			free (s);
 			r_list_free (addrs);
 			r_list_free (names);
 		}
@@ -721,7 +729,7 @@ static int cmd_seek(void *data, const char *input) {
 		case '\0': // "sf"
 			fcn = r_anal_get_fcn_in (core->anal, core->offset, 0);
 			if (fcn) {
-				r_core_seek (core, fcn->addr + r_anal_fcn_size (fcn), 1);
+				r_core_seek (core, r_anal_function_max_addr (fcn), 1);
 			}
 			break;
 		case ' ': // "sf "

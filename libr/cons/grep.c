@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2009-2018 - pancake, nibble */
+/* radare - LGPL - Copyright 2009-2020 - pancake, nibble */
 
 #include <r_cons.h>
 #include <r_util.h>
@@ -285,7 +285,7 @@ while_end:
 			if (p[2]) {
 				grep->l_line = r_num_get (cons->num, p + 2);
 			} else {
-				grep->l_line = -1;
+				grep->l_line = 0;
 			}
 		}
 	}
@@ -584,7 +584,7 @@ R_API void r_cons_grepbuf() {
 		if (grep->f_line < 0) {
 			grep->f_line = total_lines + grep->f_line;
 		}
-		if (grep->l_line < 0) {
+		if (grep->l_line <= 0) {
 			grep->l_line = total_lines + grep->l_line;
 		}
 	}
@@ -1006,4 +1006,9 @@ R_API char *r_cons_html_filter(const char *ptr, int *newlen) {
 		*newlen = res->len;
 	}
 	return r_strbuf_drain (res);
+}
+
+R_API void r_cons_grep(const char *grep) {
+	parse_grep_expression (grep);
+	r_cons_grepbuf ();
 }

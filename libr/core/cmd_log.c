@@ -57,10 +57,13 @@ static void screenlock(RCore *core) {
 	}
 	char *again = r_cons_password (Color_INVERT "Type it again:"Color_INVERT_RESET);
 	if (!again || !*again) {
+		free (pass);
 		return;
 	}
 	if (strcmp (pass, again)) {
 		eprintf ("Password mismatch!\n");
+		free (pass);
+		free (again);
 		return;
 	}
 	bool running = true;
@@ -268,7 +271,7 @@ static int cmd_log(void *data, const char *input) {
 				// TODO: Sucks that we can't enqueue functions, only commands
 				eprintf ("Background thread syncing with http.sync started.\n");
 				RCoreTask *task = r_core_task_new (core, true, "T=&&", NULL, core);
-				r_core_task_enqueue (core, task);
+				r_core_task_enqueue (&core->tasks, task);
 			}
 		} else {
 			if (atoi (input + 1) > 0 || (input[1] == '0')) {

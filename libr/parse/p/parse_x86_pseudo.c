@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2009-2017 - nibble, pancake */
+/* radare - LGPL - Copyright 2009-2020 - nibble, pancake */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -153,11 +153,11 @@ static int replace (int argc, char *argv[], char *newstr) {
 	}
 
 	/* TODO: this is slow */
-	if (newstr != NULL) {
+	if (newstr) {
 		newstr[0] = '\0';
-		for (i=0; i<argc; i++) {
+		for (i = 0; i < argc; i++) {
 			strcat (newstr, argv[i]);
-			strcat (newstr, (i == 0 || i== argc - 1)?" ":",");
+			strcat (newstr, (i == 0 || i == argc - 1)? " ": ",");
 		}
 	}
 	return false;
@@ -422,9 +422,9 @@ static bool varsub (RParse *p, RAnalFunction *f, ut64 addr, int oplen, char *dat
 	}
 
 	if (!p->varlist) {
-                free (tstr);
+		free (tstr);
 		return false;
-        }
+	}
 	bpargs = p->varlist (anal, f, 'b');
 	spargs = p->varlist (anal, f, 's');
 	/* Iterate over stack pointer arguments/variables */
@@ -438,6 +438,9 @@ static bool varsub (RParse *p, RAnalFunction *f, ut64 addr, int oplen, char *dat
 	}
 	r_list_foreach (spargs, spiter, sparg) {
 		// assuming delta always positive?
+		if (p->get_ptr_at) {
+			sparg->delta = p->get_ptr_at (p->user, sparg, addr);
+		}
 		mk_reg_str (anal->reg->name[R_REG_NAME_SP], sparg->delta, true, att, ireg, oldstr, sizeof (oldstr));
 
 		if (ucase) {

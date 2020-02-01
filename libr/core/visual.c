@@ -209,7 +209,7 @@ static const char *stackPrintCommand(RCore *core) {
 	return printHexFormats[current0format % PRINT_HEX_FORMATS];
 }
 
-static const char *__core_visual_print_command (RCore *core) {
+static const char *__core_visual_print_command(RCore *core) {
 	if (core->visual.tabs) {
 		RCoreVisualTab *tab = r_list_get_n (core->visual.tabs, core->visual.tab);
 		if (tab && tab->name[0] == ':') {
@@ -290,7 +290,7 @@ static const char *help_msg_visual[] = {
 	"??", "show this help",
 	"$", "set the program counter to the current offset + cursor",
 	"%", "in cursor mode finds matching pair, otherwise toggle autoblocksz",
-	"^", "seek to the begining of the function",
+	"^", "seek to the beginning of the function",
 	"!", "enter into the visual panels mode",
 	"TAB", "switch to the next print mode (or element in cursor mode)",
 	"_", "enter the flag/comment/functions/.. hud (same as VF_)",
@@ -599,6 +599,7 @@ repeat:
 	switch (r_cons_readchar ()) {
 	case 'q':
 		r_strbuf_free (p);
+		r_strbuf_free (q);
 		return ret;
 	case '!':
 		r_core_visual_panels_root (core, core->panels_root);
@@ -809,6 +810,9 @@ R_API int r_core_visual_prompt(RCore *core) {
 		r_cons_echo (NULL);
 		r_cons_flush ();
 		ret = true;
+		if (r_config_get_i (core->config, "cfg.debug")) {
+			r_core_cmd (core, ".dr*", 0);
+		}
 	} else {
 		ret = false;
 		//r_cons_any_key (NULL);
@@ -1161,14 +1165,13 @@ static void setprintmode(RCore *core, int n) {
 		}
 	}
 	switch (core->printidx) {
-	case R_CORE_VISUAL_MODE_PX:
-		core->inc = 16;
-		break;
 	case R_CORE_VISUAL_MODE_PD:
 	case R_CORE_VISUAL_MODE_DB:
 		r_asm_op_init (&op);
-		core->inc = r_asm_disassemble (core->assembler, &op, core->block, R_MIN (32, core->blocksize));
+		r_asm_disassemble (core->assembler, &op, core->block, R_MIN (32, core->blocksize));
 		r_asm_op_fini (&op);
+		break;
+	default:
 		break;
 	}
 }
@@ -1706,6 +1709,11 @@ static void visual_comma(RCore *core) {
 	if (cmtfile) {
 		char *cwf = r_str_newf ("%s"R_SYS_DIR "%s", cwd, cmtfile);
 		char *odata = r_file_slurp (cwf, NULL);
+		if (!odata) {
+			eprintf ("Could not open '%s'.\n", cwf);
+			free (cwf);
+			goto beach;
+		}
 		char *data = r_core_editor (core, NULL, odata);
 		r_file_dump (cwf, (const ut8 *) data, -1, 0);
 		free (data);
@@ -1714,12 +1722,13 @@ static void visual_comma(RCore *core) {
 	} else {
 		eprintf ("No commafile found.\n");
 	}
+beach:
 	free (comment);
 	r_cons_enable_mouse (mouse_state && r_config_get_i (core->config, "scr.wheel"));
 }
 
 static bool isDisasmPrint(int mode) {
-	return (mode == 1 || mode == 2);
+	return (mode == R_CORE_VISUAL_MODE_PD || mode == R_CORE_VISUAL_MODE_DB);
 }
 
 static void cursor_ocur(RCore *core, bool use_ocur) {
@@ -2327,7 +2336,7 @@ R_API int r_core_visual_cmd(RCore *core, const char *arg) {
 	const char *key_s;
 	int i, cols = core->print->cols;
 	int wheelspeed;
-	ut8 ch = och;
+	int ch = och;
 	if ((ut8)ch == KEY_ALTQ) {
 		r_cons_readchar ();
 		ch = 'q';
@@ -2434,7 +2443,7 @@ R_API int r_core_visual_cmd(RCore *core, const char *arg) {
 		}
 		break;
 		case 'o': // tab TAB
-			nextPrintFormat(core);
+			nextPrintFormat (core);
 			break;
 		case 'O': // tab TAB
 		case 9: // tab TAB
@@ -2473,7 +2482,7 @@ R_API int r_core_visual_cmd(RCore *core, const char *arg) {
 						}
 					}
 				} else {
-					prevPrintFormat(core);
+					prevPrintFormat (core);
 				}
 			}
 			break;
@@ -3370,7 +3379,8 @@ R_API int r_core_visual_cmd(RCore *core, const char *arg) {
 					r_core_dump (core, buf, from, size, false);
 				}
 			} else {
-				r_core_seek_align (core, core->blocksize, 1);
+				// r_core_seek_align (core, core->blocksize, 1);
+				r_core_seek (core, core->offset + core->blocksize, 0);
 				r_io_sundo_push (core->io, core->offset, r_print_get_cursor (core->print));
 			}
 			break;
@@ -3396,8 +3406,8 @@ R_API int r_core_visual_cmd(RCore *core, const char *arg) {
 					}
 				}
 			} else {
-				r_core_seek_align (core, core->blocksize, -1);
-				r_core_seek_align (core, core->blocksize, -1);
+				// r_core_seek_align (core, core->blocksize, -1);
+				r_core_seek (core, core->offset - core->blocksize, 0);
 				r_io_sundo_push (core->io, core->offset, r_print_get_cursor (core->print));
 			}
 			break;
@@ -3558,7 +3568,7 @@ R_API int r_core_visual_cmd(RCore *core, const char *arg) {
 						core->seltab = 2;
 					}
 				} else {
-					prevPrintFormat(core);
+					prevPrintFormat (core);
 				}
 			} else { // "Z"
 				ut64 addr = core->print->cur_enabled? core->offset + core->print->cur: core->offset;
@@ -3612,8 +3622,10 @@ R_API void r_core_visual_title(RCore *core, int color) {
 			break;
 #endif
 		case R_CORE_VISUAL_MODE_PX: // x
-			if ((R_ABS(hexMode) % 3) == 0) { // prx
+			if (currentFormat == 3 || currentFormat == 9 || currentFormat == 5) { // prx
 				r_core_block_size (core, (int)(core->cons->rows * hexcols * 4));
+			} else if ((R_ABS (hexMode) % 3) == 0) { // prx
+				r_core_block_size (core, (int)(core->cons->rows * hexcols));
 			} else {
 				r_core_block_size (core, (int)(core->cons->rows * hexcols * 2));
 			}
@@ -4077,8 +4089,7 @@ static void visual_refresh(RCore *core) {
 	}
 	if (cmd_str && *cmd_str) {
 		if (vsplit) {
-			char *cmd_result;
-			cmd_result = r_core_cmd_str (core, cmd_str);
+			char *cmd_result = r_core_cmd_str (core, cmd_str);
 			cmd_result = r_str_ansi_crop (cmd_result, 0, 0, split_w, -1);
 			r_cons_strcat (cmd_result);
 		} else {
@@ -4118,7 +4129,7 @@ static void visual_refresh(RCore *core) {
 }
 
 static void visual_refresh_oneshot(RCore *core) {
-	r_core_task_enqueue_oneshot (core, (RCoreTaskOneShot) visual_refresh, core);
+	r_core_task_enqueue_oneshot (&core->tasks, (RCoreTaskOneShot) visual_refresh, core);
 }
 
 R_API void r_core_visual_disasm_up(RCore *core, int *cols) {
@@ -4140,7 +4151,7 @@ R_API void r_core_visual_disasm_down(RCore *core, RAsmOp *op, int *cols) {
 	f = r_anal_get_fcn_in (core->anal, core->offset, 0);
 	op->size = 1;
 	if (f && f->folded) {
-		*cols = core->offset - f->addr + r_anal_fcn_size (f);
+		*cols = core->offset - r_anal_function_max_addr (f);
 	} else {
 		r_asm_set_pc (core->assembler, core->offset);
 		*cols = r_asm_disassemble (core->assembler,

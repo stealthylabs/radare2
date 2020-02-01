@@ -14,6 +14,8 @@ typedef enum {
 	R_STRING_ENC_UTF8 = '8',
 	R_STRING_ENC_UTF16LE = 'u',
 	R_STRING_ENC_UTF32LE = 'U',
+	R_STRING_ENC_UTF16BE = 'b',
+	R_STRING_ENC_UTF32BE = 'B',
 	R_STRING_ENC_GUESS = 'g',
 } RStrEnc;
 
@@ -31,8 +33,8 @@ static inline void r_str_rmch(char *s, char ch) {
 #define R_STR_ISNOTEMPTY(x) ((x) && *(x))
 #define R_STR_DUP(x) ((x) ? strdup ((x)) : NULL)
 #define r_str_array(x,y) ((y>=0 && y<(sizeof(x)/sizeof(*x)))?x[y]:"")
+R_API char *r_str_repeat(const char *ch, int sz);
 R_API const char *r_str_pad(const char ch, int len);
-R_API const char *r_str_repeat(const char *ch, int sz);
 R_API const char *r_str_rstr(const char *base, const char *p);
 R_API const char *r_strstr_ansi (const char *a, const char *b);
 R_API const char *r_str_rchr(const char *base, const char *p, int ch);
@@ -88,9 +90,11 @@ R_API bool r_str_is_printable_incl_newlines(const char *str);
 R_API char *r_str_appendlen(char *ptr, const char *string, int slen);
 R_API char *r_str_newf(const char *fmt, ...);
 R_API char *r_str_newlen(const char *str, int len);
+R_API const char *r_str_sysbits(const int v);
 R_API char *r_str_trunc_ellipsis(const char *str, int len);
 R_API const char *r_str_bool(int b);
 R_API bool r_str_is_true(const char *s);
+R_API bool r_str_is_false(const char *s);
 R_API bool r_str_is_bool(const char *val);
 R_API const char *r_str_ansi_chrn(const char *str, int n);
 R_API int r_str_ansi_len(const char *str);
@@ -122,6 +126,7 @@ R_API const char *r_sub_str_lchr(const char *str, int start, int end, char chr);
 R_API const char *r_sub_str_rchr(const char *str, int start, int end, char chr);
 R_API char *r_str_ichr(char *str, char chr);
 R_API bool r_str_ccmp(const char *dst, const char *orig, int ch);
+R_API bool r_str_cmp_list(const char *list, const char *item, char sep);
 R_API int r_str_cmp(const char *dst, const char *orig, int len);
 R_API int r_str_casecmp(const char *dst, const char *orig);
 R_API int r_str_ncasecmp(const char *dst, const char *orig, size_t n);
@@ -143,13 +148,11 @@ typedef void(*str_operation)(char *c);
 
 R_API int r_str_do_until_token(str_operation op, char *str, const char tok);
 
-R_API const char *r_str_const(const char *ptr);
-R_API const char *r_str_const_at(char ***consts, const char *ptr);
-R_API void r_str_const_free(char ***consts);
-
 R_API void r_str_reverse(char *str);
 R_API int r_str_re_match(const char *str, const char *reg);
 R_API int r_str_re_replace(const char *str, const char *reg, const char *sub);
+R_API int r_str_path_unescape(char *path);
+R_API char *r_str_path_escape(const char *path);
 R_API int r_str_unescape(char *buf);
 R_API char *r_str_escape(const char *buf);
 R_API char *r_str_escape_dot(const char *buf);
@@ -157,6 +160,8 @@ R_API char *r_str_escape_latin1(const char *buf, bool show_asciidot, bool esc_bs
 R_API char *r_str_escape_utf8(const char *buf, bool show_asciidot, bool esc_bslash);
 R_API char *r_str_escape_utf16le(const char *buf, int buf_size, bool show_asciidot, bool esc_bslash);
 R_API char *r_str_escape_utf32le(const char *buf, int buf_size, bool show_asciidot, bool esc_bslash);
+R_API char *r_str_escape_utf16be(const char *buf, int buf_size, bool show_asciidot, bool esc_bslash);
+R_API char *r_str_escape_utf32be(const char *buf, int buf_size, bool show_asciidot, bool esc_bslash);
 R_API void r_str_byte_escape(const char *p, char **dst, int dot_nl, bool default_dot, bool esc_bslash);
 R_API void r_str_uri_decode(char *buf);
 R_API char *r_str_uri_encode(const char *buf);

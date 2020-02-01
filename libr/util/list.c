@@ -80,7 +80,7 @@ R_API void r_list_purge(RList *list) {
 R_API void r_list_free(RList *list) {
 	if (list) {
 		r_list_purge (list);
-		R_FREE (list);
+		free (list);
 	}
 }
 
@@ -106,7 +106,7 @@ R_API void r_list_delete(RList *list, RListIter *iter) {
 		list->free (iter->data);
 	}
 	iter->data = NULL;
-	R_FREE (iter);
+	free (iter);
 }
 
 R_API void r_list_split(RList *list, void *ptr) {
@@ -362,7 +362,7 @@ R_API void r_list_reverse(RList *list) {
 	list->tail = tmp;
 }
 
-R_API RList *r_list_clone(RList *list) {
+R_API RList *r_list_clone(const RList *list) {
 	RList *l = NULL;
 	RListIter *iter;
 	void *data;
@@ -416,7 +416,7 @@ R_API int r_list_set_n(RList *list, int n, void *p) {
 	int i;
 
 	r_return_val_if_fail (list, false);
-	for (it = list->head, i = 0; it && it->data; it = it->n, i++) {
+	for (it = list->head, i = 0; it ; it = it->n, i++) {
 		if (i == n) {
 			if (list->free) {
 				list->free (it->data);

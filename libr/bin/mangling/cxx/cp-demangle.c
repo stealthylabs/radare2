@@ -82,7 +82,7 @@
 
    IN_GLIBCPP_V3
       If defined, this file defines only __cxa_demangle() and
-      __gcclibcxx_demangle_callback(), and no other publically visible
+      __gcclibcxx_demangle_callback(), and no other publicly visible
       functions or variables.
 
    STANDALONE_DEMANGLER
@@ -125,7 +125,7 @@ extern char *alloca ();
 
 #include <limits.h>
 #ifndef INT_MAX
-# define INT_MAX       (int)(((unsigned int) ~0) >> 1)          /* 0x7FFFFFFF */ 
+# define INT_MAX       (int)(((unsigned int) ~0) >> 1)          /* 0x7FFFFFFF */
 #endif
 
 #include "ansidecl.h"

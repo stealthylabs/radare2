@@ -805,7 +805,7 @@ R_API void r_print_section(RPrint *p, ut64 at) {
 	if (use_section) {
 		const char *s = p->get_section_name (p->user, at);
 		if (!s) {
-			s = strdup ("");
+			s = "";
 		}
 		char *tail = r_str_ndup (s, 19);
 		p->cb_printf ("%20s ", tail);
@@ -1070,7 +1070,7 @@ R_API void r_print_hexdump(RPrint *p, ut64 addr, const ut8 *buf, int len, int ba
 			}
 			for (j = i; j < i + inc; j++) {
 				if (j!=i && use_align && rowbytes == inc) {
-					int sz = p->offsize (p->user, addr + j);
+					int sz = (p && p->offsize)? p->offsize (p->user, addr + j): -1;
 					if (sz >= 0) {
 						rowbytes = bytes;
 					}
@@ -1549,13 +1549,15 @@ static RPrint staticp = {
 };
 
 /* TODO: handle screen width */
-R_API void r_print_progressbar(RPrint *p, int _pc, int _cols) {
-	double pc = _pc;
+R_API void r_print_progressbar(RPrint *p, int pc, int _cols) {
 	// TODO: add support for colors
 	int i, cols = (_cols == -1)? 78: _cols;
 	if (!p) {
 		p = &staticp;
 	}
+	const char *h_line = p->cons->use_utf8 ? RUNE_LONG_LINE_HORIZ : "-";
+	const char *block = p->cons->use_utf8 ? UTF_BLOCK : "#";
+
 	pc = R_MAX (0, R_MIN (100, pc));
 	if (p->flags & R_PRINT_FLAGS_HEADER) {
 		p->cb_printf ("%4d%% ", pc);
@@ -1563,15 +1565,17 @@ R_API void r_print_progressbar(RPrint *p, int _pc, int _cols) {
 	cols -= 15;
 	p->cb_printf ("[");
 	for (i = cols * pc / 100; i; i--) {
-		p->cb_printf ("#");
+		p->cb_printf (block);
 	}
 	for (i = cols - (cols * pc / 100); i; i--) {
-		p->cb_printf ("-");
+		p->cb_printf (h_line);
 	}
 	p->cb_printf ("]");
 }
 
 R_API void r_print_rangebar(RPrint *p, ut64 startA, ut64 endA, ut64 min, ut64 max, int cols) {
+	const char *h_line = p->cons->use_utf8 ? RUNE_LONG_LINE_HORIZ : "-";
+	const char *block = p->cons->use_utf8 ? UTF_BLOCK : "#";
 	const bool show_colors = p->flags & R_PRINT_FLAGS_COLOR;
 	int j = 0;
 	p->cb_printf ("|");
@@ -1585,18 +1589,15 @@ R_API void r_print_rangebar(RPrint *p, ut64 startA, ut64 endA, ut64 min, ut64 ma
 		ut64 endB = min + ((j + 1) * mul);
 		if (startA <= endB && endA >= startB) {
 			if (show_colors & isFirst) {
-				p->cb_printf (Color_GREEN "#");
+				p->cb_printf (Color_GREEN);
 				isFirst = false;
-			} else {
-				p->cb_printf ("#");
 			}
+			p->cb_printf (block);
 		} else {
-			if (isFirst) {
-				p->cb_printf ("-");
-			} else {
-				p->cb_printf (Color_RESET "-");
-				isFirst = true;
+			if (!isFirst) {
+				p->cb_printf (Color_RESET);
 			}
+			p->cb_printf (h_line);
 		}
 	}
 	p->cb_printf ("|");

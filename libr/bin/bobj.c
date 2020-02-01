@@ -26,7 +26,7 @@ static int reloc_cmp(const void *a, const RBNode *b, void *user) {
 	return 0;
 }
 
-static void reloc_free(RBNode *rbn) {
+static void reloc_free(RBNode *rbn, void *user) {
 	free (container_of (rbn, RBinReloc, vrb));
 }
 
@@ -38,7 +38,7 @@ static void object_delete_items(RBinObject *o) {
 	r_list_free (o->fields);
 	r_list_free (o->imports);
 	r_list_free (o->libs);
-	r_rbtree_free (o->relocs, reloc_free);
+	r_rbtree_free (o->relocs, reloc_free, NULL);
 	r_list_free (o->sections);
 	r_list_free (o->strings);
 	ht_up_free (o->strings_db);
@@ -335,8 +335,7 @@ R_API int r_bin_object_set_items(RBinFile *bf, RBinObject *o) {
 				REBASE_PADDR (o, l, RBinReloc);
 				o->relocs = list2rbtree (l);
 				l->free = NULL;
-				// causes double free
-				//r_list_free (l);
+				r_list_free (l);
 			}
 		}
 	}
@@ -421,7 +420,7 @@ R_IPI RBNode *r_bin_object_patch_relocs(RBin *bin, RBinObject *o) {
 		if (!tmp) {
 			return o->relocs;
 		}
-		r_rbtree_free (o->relocs, reloc_free);
+		r_rbtree_free (o->relocs, reloc_free, NULL);
 		REBASE_PADDR (o, tmp, RBinReloc);
 		o->relocs = list2rbtree (tmp);
 		first = false;

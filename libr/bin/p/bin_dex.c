@@ -10,8 +10,6 @@
 #define r_hash_adler32 __adler32
 #include "../../hash/adler32.c"
 
-#define r_str_const(x) x
-
 // globals to kill
 extern struct r_bin_dbginfo_t r_bin_dbginfo_dex;
 static bool dexdump = false;
@@ -708,6 +706,8 @@ static void dex_parse_debug_item(RBinFile *bf, RBinDexObj *bin,
 			rbindwardrow->address = pos->address;
 			rbindwardrow->line = pos->line;
 			r_list_append (dex->lines_list, rbindwardrow);
+		} else {
+			free (rbindwardrow);
 		}
 	}
 #endif
@@ -1145,10 +1145,10 @@ static const ut8 *parse_dex_class_fields(RBinFile *bf, RBinDexClass *c, RBinClas
 		}
 		if (is_sfield) {
 			sym->name = r_str_newf ("%s.sfield_%s:%s", cls->name, fieldName, type_str);
-			sym->type = r_str_const ("STATIC");
+			sym->type = "STATIC";
 		} else {
 			sym->name = r_str_newf ("%s.ifield_%s:%s", cls->name, fieldName, type_str);
-			sym->type = r_str_const ("FIELD");
+			sym->type = "FIELD";
 		}
 		sym->name = r_str_replace (sym->name, "method.", "", 0);
 		r_str_replace_char (sym->name, ';', 0);
@@ -1399,19 +1399,19 @@ static const ut8 *parse_dex_class_method(RBinFile *bf, RBinDexClass *c, RBinClas
 			// if method has code *addr points to code
 			// otherwise it points to the encoded method
 			if (MC > 0) {
-				sym->type = r_str_const (R_BIN_TYPE_FUNC_STR);
+				sym->type = R_BIN_TYPE_FUNC_STR;
 				sym->paddr = MC;// + 0x10;
 				sym->vaddr = MC;// + 0x10;
 			} else {
-				sym->type = r_str_const (R_BIN_TYPE_METH_STR);
+				sym->type = R_BIN_TYPE_METH_STR;
 				sym->paddr = encoded_method_addr - bufbuf;
 				sym->vaddr = encoded_method_addr - bufbuf;
 			}
 			bin->code_from = R_MIN (bin->code_from, sym->paddr);
 			if ((MA & 1) == 1) {
-				sym->bind = r_str_const (R_BIN_BIND_GLOBAL_STR);
+				sym->bind = R_BIN_BIND_GLOBAL_STR;
 			} else {
-				sym->bind = r_str_const (R_BIN_BIND_LOCAL_STR);
+				sym->bind = R_BIN_BIND_LOCAL_STR;
 			}
 
 			sym->method_flags = get_method_flags (MA);
@@ -1450,7 +1450,7 @@ static const ut8 *parse_dex_class_method(RBinFile *bf, RBinDexClass *c, RBinClas
 				if (!mdb) {
 					mdb = sdb_new0 ();
 				}
-				sdb_num_set (mdb, sdb_fmt ("method.%d", MI), sym->paddr, 0);
+				sdb_num_set (mdb, sdb_fmt ("method.%"PFMT64d, MI), sym->paddr, 0);
 				// -----------------
 				// WORK IN PROGRESS
 				// -----------------
@@ -1720,13 +1720,15 @@ static bool dex_loadcode(RBinFile *bf) {
 	}
 	bin->lines_list = r_list_newf ((RListFree)free);
 	if (!bin->lines_list) {
+		r_list_free (bin->methods_list);
+		r_list_free (bin->imports_list);
 		return false;
 	}
 	bin->classes_list = r_list_newf ((RListFree)r_bin_class_free);
 	if (!bin->classes_list) {
 		r_list_free (bin->methods_list);
-		r_list_free (bin->lines_list);
 		r_list_free (bin->imports_list);
+		r_list_free (bin->lines_list);
 		return false;
 	}
 
@@ -1809,8 +1811,8 @@ static bool dex_loadcode(RBinFile *bf) {
 					return false;
 				}
 				imp->name  = r_str_newf ("%s.method.%s%s", class_name, method_name, signature);
-				imp->type = r_str_const ("FUNC");
-				imp->bind = r_str_const ("NONE");
+				imp->type = "FUNC";
+				imp->bind = "NONE";
 				imp->ordinal = import_count++;
 				r_list_append (bin->imports_list, imp);
 
@@ -1821,9 +1823,10 @@ static bool dex_loadcode(RBinFile *bf) {
 					free (class_name);
 					return false;
 				}
-				sym->name = r_str_newf ("imp.%s", imp->name);
-				sym->type = r_str_const (R_BIN_TYPE_FUNC_STR);
-				sym->bind = r_str_const ("NONE");
+				sym->name = strdup (imp->name);
+				sym->is_imported = true;
+				sym->type = R_BIN_TYPE_FUNC_STR;
+				sym->bind = "NONE";
 				//XXX so damn unsafe check buffer boundaries!!!!
 				//XXX use r_buf API!!
 				sym->paddr = sym->vaddr = bin->header.method_offset + (sizeof (struct dex_method_t) * i) ;
@@ -2136,7 +2139,7 @@ static ut64 size(RBinFile *bf) {
 	return off + r_read_le32 (u32s);
 }
 
-static RList *lines(RBinFile *bf) {
+static R_BORROW RList *lines(RBinFile *bf) {
 	struct r_bin_dex_obj_t *dex = bf->o->bin_obj;
 	/// XXX this is called more than once
 	// r_sys_backtrace();
@@ -2180,14 +2183,34 @@ static RList *dex_fields(RBinFile *bf) {
 	return ret;
 }
 
+static int cmp_path(const void *a, const void *b) {
+	if (!a || !b) {
+		return 0;
+	}
+	return strcmp ((const char*)a, (const char*)b);
+}
+
 static RList* libs(RBinFile *bf) {
 	r_return_val_if_fail (bf && bf->o && bf->o->bin_obj, NULL);
 	char *path = r_file_dirname (bf->file);
-	RList *files = r_sys_dir (path);
-	RList *ret = r_list_newf (free);
-	if (!ret) {
+	if (r_str_startswith (path, "./")) {
+		// avoids stuff like .//.//.//.//.//
+		free (path);
 		return NULL;
 	}
+	RList *files = r_sys_dir (path);
+	if (!files) {
+		free (path);
+		return NULL;
+	}
+	RList *ret = r_list_newf (free);
+	if (!ret) {
+		free (path);
+		r_list_free (files);
+		return NULL;
+	}
+	/* opening dex files in order. */
+	r_list_sort(files, cmp_path);
 	RListIter *iter;
 	char *file;
 	r_list_foreach (files, iter, file) {
@@ -2199,6 +2222,7 @@ static RList* libs(RBinFile *bf) {
 			if (strcmp (n, bf->file)) {
 				r_list_append (ret, n);
 			}
+			free (n);
 		}
 	}
 	r_list_free (files);

@@ -143,8 +143,10 @@ static const char *help_msg_oob[] = {
 };
 
 static const char *help_msg_ood[] = {
-	"Usage:", "ood [args]", " # reopen in debugger mode (with args)",
-	"oodr"," [rarun2]","same as dor ..;ood",
+	"Usage:", "ood", " # Debug (re)open commands",
+	"ood", " [args]", " # reopen in debug mode (with args)",
+	"oodf", " [file]", " # reopen in debug mode using the given file",
+	"oodr", " [rarun2]", " # same as dor ..;ood",
 	NULL
 };
 
@@ -157,17 +159,6 @@ static const char *help_msg_oonn[] = {
 	"Usage:", "oonn", " # reopen without loading rbin info, but with header flags",
 	NULL
 };
-
-static RBinFile *find_binfile_by_id(RBin *bin, ut32 id) {
-	RListIter *it;
-	RBinFile *bf;
-	r_list_foreach (bin->binfiles, it, bf) {
-		if (bf->id == id) {
-			return bf;
-		}
-	}
-	return NULL;
-}
 
 static void cmd_open_init(RCore *core) {
 	DEFINE_CMD_DESCRIPTOR (core, o);
@@ -245,7 +236,6 @@ static void cmd_open_bin(RCore *core, const char *input) {
 				RIODesc *desc = r_io_desc_get (core->io, fd);
 				if (desc) {
 					RBinOptions opt;
-					opt.offset = addr;
 					opt.baseaddr = baddr;
 					opt.loadaddr = addr;
 					opt.sz = 1024*1024*1;
@@ -261,7 +251,6 @@ static void cmd_open_bin(RCore *core, const char *input) {
 				RIODesc *desc = r_io_desc_get (core->io, fd);
 				if (desc) {
 					RBinOptions opt;
-					opt.offset = addr;
 					opt.baseaddr = addr;
 					opt.loadaddr = addr;
 					opt.sz = 1024 * 1024 * 1;
@@ -299,7 +288,7 @@ static void cmd_open_bin(RCore *core, const char *input) {
 		break;
 	case ' ': // "ob "
 	{
-		ut32 fd;
+		ut32 id;
 		int n;
 		const char *tmp;
 		char *v;
@@ -315,12 +304,12 @@ static void cmd_open_bin(RCore *core, const char *input) {
 			break;
 		}
 		tmp = r_str_word_get0 (v, 0);
-		fd = *v && r_is_valid_input_num_value (core->num, tmp)
+		id = *v && r_is_valid_input_num_value (core->num, tmp)
 			? r_get_input_num_value (core->num, tmp): UT32_MAX;
 		if (n == 2) {
 			tmp = r_str_word_get0 (v, 1);
 		} else {
-			binfile_num = fd;
+			binfile_num = id;
 		}
 		r_core_bin_raise (core, binfile_num);
 		free (v);
@@ -353,23 +342,21 @@ static void cmd_open_bin(RCore *core, const char *input) {
 		if (input[2] == '*') {
 			r_bin_file_delete_all (core->bin);
 		} else {
-			ut32 fd;
+			ut32 id;
 			value = r_str_trim_ro (input + 2);
 			if (!value) {
 				eprintf ("Invalid argument\n");
 				break;
 			}
-			fd = (*value && r_is_valid_input_num_value (core->num, value)) ?
+			id = (*value && r_is_valid_input_num_value (core->num, value)) ?
 					r_get_input_num_value (core->num, value) : UT32_MAX;
-			RBinFile *bf = find_binfile_by_id (core->bin, fd);
+			RBinFile *bf = r_bin_file_find_by_id (core->bin, id);
 			if (!bf) {
 				eprintf ("Invalid binid\n");
 				break;
 			}
-			if (r_core_bin_delete (core, bf->id)) {
-				if (!r_bin_file_delete (core->bin, fd)) {
-					eprintf ("Cannot find an RBinFile associated with that fd.\n");
-				}
+			if (!r_core_bin_delete (core, bf->id)) {
+				eprintf ("Cannot find an RBinFile associated with that id.\n");
 			}
 		}
 		break;
@@ -531,7 +518,7 @@ static void cmd_omf(RCore *core, const char *input) {
 
 static void r_core_cmd_omt(RCore *core, const char *arg) {
 	RTable *t = r_table_new ();
-	
+
 	r_table_set_columnsf (t, "nnnnnnnss", "id", "fd", "pa", "pa_end", "size", "va", "va_end", "perm", "name", NULL);
 
 	SdbListIter *iter;
@@ -820,7 +807,7 @@ static void cmd_open_map(RCore *core, const char *input) {
 			}
 		}
 		break;
-	case '=': // "om=" 
+	case '=': // "om="
 		{
 		RList *list = r_list_newf ((RListFree) r_listinfo_free);
 		if (!list) {
@@ -839,9 +826,11 @@ static void cmd_open_map(RCore *core, const char *input) {
 		RTable *table = r_core_table (core);
 		r_table_visual_list (table, list, core->offset, core->blocksize,
 			r_cons_get_size (NULL), r_config_get_i (core->config, "scr.color"));
-		r_cons_printf ("\n%s\n", r_table_tostring (table));
+		char *tablestr = r_table_tostring (table);
+		r_cons_printf ("\n%s\n", tablestr);
 		r_table_free (table);
 		r_list_free (list);
+		free (tablestr);
 		} break;
 	default:
 	case '?':
@@ -901,11 +890,17 @@ R_API void r_core_file_reopen_in_malloc(RCore *core) {
 }
 
 static RList *__save_old_sections(RCore *core) {
-	// Do I really need this?
 	RList *sections = r_bin_get_sections (core->bin);
 	RListIter *it;
 	RBinSection *sec;
 	RList *old_sections = r_list_new ();
+
+	// Return an empty list
+	if (!sections) {
+		eprintf ("WARNING: No sections found, functions and flags won't be rebased");
+		return old_sections;
+	}
+
 	old_sections->free = sections->free;
 	r_list_foreach (sections, it, sec) {
 		RBinSection *old_sec = R_NEW0 (RBinSection);
@@ -929,13 +924,14 @@ struct __rebase_struct {
 };
 
 #define __is_inside_section(item_addr, section)\
-		(item_addr >= old_base + section->vaddr && item_addr <= old_base + section->vaddr + section->vsize)
+	(item_addr >= old_base + section->vaddr && item_addr <= old_base + section->vaddr + section->vsize)
 
 static bool __rebase_flags(RFlagItem *flag, void *user) {
 	struct __rebase_struct *reb = user;
 	ut64 old_base = reb->old_base;
 	RListIter *it;
 	RBinSection *sec;
+	// Only rebase flags that were in the rebased sections, otherwise it will take too long
 	r_list_foreach (reb->old_sections, it, sec) {
 		if (__is_inside_section (flag->offset, sec)) {
 			r_flag_set (reb->core->flags, flag->name, flag->offset + reb->diff, flag->size);
@@ -946,7 +942,7 @@ static bool __rebase_flags(RFlagItem *flag, void *user) {
 }
 
 static bool __rebase_refs_i(void *user, const ut64 k, const void *v) {
-	struct __rebase_struct *reb = (void*)user;
+	struct __rebase_struct *reb = (void *)user;
 	RAnalRef *ref = (RAnalRef *)v;
 	ref->addr += reb->diff;
 	ref->at += reb->diff;
@@ -962,7 +958,6 @@ static bool __rebase_refs(void *user, const ut64 k, const void *v) {
 	HtUP *ht = (HtUP *)v;
 	ht_up_foreach (ht, __rebase_refs_i, user);
 	return true;
-
 }
 
 static void __rebase_everything(RCore *core, RList *old_sections, ut64 old_base) {
@@ -976,33 +971,12 @@ static void __rebase_everything(RCore *core, RList *old_sections, ut64 old_base)
 	}
 	// FUNCTIONS
 	r_list_foreach (core->anal->fcns, it, fcn) {
-		int i = 0;
 		r_list_foreach (old_sections, itit, old_section) {
 			if (!__is_inside_section (fcn->addr, old_section)) {
-				i++;
 				continue;
 			}
-			RList *var_list = r_anal_var_all_list (core->anal, fcn);
-			RAnalVar *var;
-			r_list_foreach (var_list, ititit, var) {
-				r_anal_var_delete (core->anal, var->addr, var->kind, 1, var->delta);
-				var->addr += diff;
-				r_anal_var_add (core->anal, var->addr, 1, var->delta, var->kind, var->type, var->size, var->isarg, var->name);
-			}
-			r_list_free (var_list);
-			r_anal_fcn_tree_delete (core->anal, fcn);
-			fcn->addr += diff;
-			if (fcn->meta.max) {
-				fcn->meta.max += diff;
-			}
-			if (fcn->meta.min) {
-				fcn->meta.min += diff;
-			}
-			int j;
-			for (j = 0; j < fcn->bbr.pairs * 2; j++) {
-				fcn->bbr.ranges[j] += diff;
-			}
-			r_anal_fcn_tree_insert (core->anal, fcn);
+			r_anal_var_rebase (core->anal, fcn, diff);
+			r_anal_function_relocate (fcn, fcn->addr + diff);
 			RAnalBlock *bb;
 			ut64 new_sec_addr = new_base + old_section->vaddr;
 			r_list_foreach (fcn->bbs, ititit, bb) {
@@ -1010,7 +984,7 @@ static void __rebase_everything(RCore *core, RList *old_sections, ut64 old_base)
 					// Todo: Find better way to check if bb was already rebased
 					continue;
 				}
-				bb->addr += diff;
+				r_anal_block_relocate (bb, bb->addr + diff, bb->size);
 				if (bb->jump != UT64_MAX) {
 					bb->jump += diff;
 				}
@@ -1035,17 +1009,9 @@ static void __rebase_everything(RCore *core, RList *old_sections, ut64 old_base)
 	RList *meta_list = r_meta_enumerate (core->anal, R_META_TYPE_ANY);
 	RAnalMetaItem *item;
 	r_list_foreach (meta_list, it, item) {
-		int i = 0;
-		r_list_foreach (old_sections, itit, old_section) {
-			if (!__is_inside_section (item->from, old_section)) {
-				i++;
-				continue;
-			}
-			r_meta_del (core->anal, item->type, item->from, item->size);
-			item->from += diff;
-			r_meta_add_with_subtype (core->anal, item->type, item->subtype, item->from, item->from + item->size, item->str);
-			break;
-		}
+		r_meta_del (core->anal, item->type, item->from, item->size);
+		item->from += diff;
+		r_meta_add_with_subtype (core->anal, item->type, item->subtype, item->from, item->from + item->size, item->str);
 	}
 	r_list_free (meta_list);
 
@@ -1061,15 +1027,75 @@ static void __rebase_everything(RCore *core, RList *old_sections, ut64 old_base)
 	ht_up_foreach (old_xrefs, __rebase_refs, &reb);
 	ht_up_free (old_refs);
 	ht_up_free (old_xrefs);
+
+	// BREAKPOINTS
+	r_debug_bp_rebase (core->dbg, old_base, new_base);
+}
+
+R_API void r_core_file_reopen_remote_debug(RCore *core, char *uri, ut64 addr) {
+	RCoreFile *ofile = core->file;
+	RIODesc *desc;
+	RCoreFile *file;
+	int fd;
+
+	if (!ofile || !(desc = r_io_desc_get (core->io, ofile->fd)) || !desc->uri) {
+		eprintf ("No file open?\n");
+		return;
+	}
+
+	RList *old_sections = __save_old_sections (core);
+	ut64 old_base = core->bin->cur->o->baddr_shift;
+	int bits = core->assembler->bits;
+	r_config_set_i (core->config, "asm.bits", bits);
+	r_config_set_i (core->config, "cfg.debug", true);
+	// Set referer as the original uri so we could return to it with `oo`
+	desc->referer = desc->uri;
+	desc->uri = strdup (uri);
+
+	if ((file = r_core_file_open (core, uri, R_PERM_R | R_PERM_W, addr))) {
+		fd = file->fd;
+		core->num->value = fd;
+		// if no baddr is defined, use the one provided by the file
+		if (addr == 0) {
+			desc = r_io_desc_get (core->io, file->fd);
+			if (desc->plugin->isdbg) {
+				addr = r_debug_get_baddr(core->dbg, desc->name);
+			} else {
+				addr = r_bin_get_baddr (file->binb.bin);
+			}
+		}
+		r_core_bin_load (core, uri, addr);
+	} else {
+		eprintf ("cannot open file %s\n", uri);
+		r_list_free (old_sections);
+		return;
+	}
+	r_core_block_read (core);
+	if (r_config_get_i (core->config, "dbg.rebase")) {
+		__rebase_everything (core, old_sections, old_base);
+	}
+	r_list_free (old_sections);
+	r_core_cmd0 (core, "sr PC");
 }
 
 R_API void r_core_file_reopen_debug(RCore *core, const char *args) {
 	RCoreFile *ofile = core->file;
 	RIODesc *desc;
+
 	if (!ofile || !(desc = r_io_desc_get (core->io, ofile->fd)) || !desc->uri) {
 		eprintf ("No file open?\n");
 		return;
 	}
+
+	// Reopen the original file as read only since we can't open native debug while the
+	// file is open with write permissions
+	if (!(desc->plugin && desc->plugin->isdbg) && (desc->perm & R_PERM_W)) {
+		eprintf ("Cannot debug file (%s) with permissions set to 0x%x.\n"
+			"Reopening the original file in read-only mode.\n", desc->name, desc->perm);
+		r_io_reopen (core->io, ofile->fd, R_PERM_R, 644);
+		desc = r_io_desc_get (core->io, ofile->fd);
+	}
+
 	RBinFile *bf = r_bin_file_find_by_fd (core->bin, ofile->fd);
 	char *binpath = (bf && bf->file) ? strdup (bf->file) : NULL;
 	if (!binpath) {
@@ -1167,16 +1193,18 @@ static bool desc_list_cb(void *user, void *data, ut32 id) {
 }
 
 static bool desc_list_json_cb(void *user, void *data, ut32 id) {
-	RPrint *p = (RPrint *)user;
+	PJ *pj = (PJ *)user;
 	RIODesc *desc = (RIODesc *)data;
 	// TODO: from is always 0? See libr/core/file.c:945
 	ut64 from = 0LL;
-	p->cb_printf ("{\"raised\":%s,\"fd\":%d,\"uri\":\"%s\",\"from\":%"
-			PFMT64d ",\"writable\":%s,\"size\":%" PFMT64d "}%s",
-			r_str_bool (desc->io && (desc->io->desc == desc)),
-			desc->fd, desc->uri, from,
-			r_str_bool ((desc->perm & R_PERM_W)),
-			r_io_desc_size (desc), (desc->io->files->top_id == id) ? "" : ",");
+	pj_o (pj);
+	pj_kb (pj, "raised", desc->io && (desc->io->desc == desc));
+	pj_kN (pj, "fd", desc->fd);
+	pj_ks (pj, "uri", desc->uri);
+	pj_kn (pj, "from", from);
+	pj_kb (pj, "writable", desc->perm & R_PERM_W);
+	pj_kN (pj, "size", r_io_desc_size (desc));
+	pj_end (pj);
 	return true;
 }
 
@@ -1370,6 +1398,8 @@ static int cmd_open(void *data, const char *input) {
 			return 0;
 		}
 		if (argv) {
+			// Unescape spaces from the path
+			r_str_path_unescape (argv[0]);
 			if (argc == 2) {
 				if (r_num_is_valid_input (core->num, argv[1])) {
 					addr = r_num_math (core->num, argv[1]);
@@ -1428,9 +1458,12 @@ static int cmd_open(void *data, const char *input) {
 			r_core_cmd_help (core, help_msg_oj);
 			break;
 		}
-		core->print->cb_printf ("[");
-		r_id_storage_foreach (core->io->files, desc_list_json_cb, core->print);
-		core->print->cb_printf ("]\n");
+		PJ *pj = pj_new ();
+		pj_a (pj);
+		r_id_storage_foreach (core->io->files, desc_list_json_cb, pj);
+		pj_end (pj);
+		core->print->cb_printf ("%s\n", pj_string (pj));
+		pj_free (pj);
 		break;
 	case 'L': // "oL"
 		if (r_sandbox_enable (0)) {
@@ -1593,6 +1626,22 @@ static int cmd_open(void *data, const char *input) {
 			if (input[2] == 'r') { // "oodr"
 				r_core_cmdf (core, "dor %s", input + 3);
 				r_core_file_reopen_debug (core, "");
+			} else if (input[2] == 'f') { // "oodf"
+				char **argv = NULL;
+				int addr = 0;
+				argv = r_str_argv (input + 3, &argc);
+				if (argc == 0) {
+					eprintf ("Usage: oodf (uri://)[/path/to/file] (addr)\n");
+					r_str_argv_free (argv);
+					return 0;
+				}
+				if (argc == 2) {
+					if (r_num_is_valid_input (core->num, argv[1])) {
+						addr = r_num_math (core->num, argv[1]);
+					}
+				}
+				r_core_file_reopen_remote_debug (core, argv[0], addr);
+				r_str_argv_free (argv);
 			} else if ('?' == input[2]) {
 				r_core_cmd_help (core, help_msg_ood);
 			} else {
@@ -1618,9 +1667,8 @@ static int cmd_open(void *data, const char *input) {
 				}
 				perms = (input[3] == '+')? R_PERM_R|R_PERM_W: 0;
 				r_core_file_reopen (core, input + 4, perms, 0);
-				// TODO: Use API instead of !rabin2 -rk
 				if (desc) {
-					r_core_cmdf (core, ".!rabin2 -rk '' '%s'", desc->name);
+					r_core_bin_load_structs (core, desc->name);
 				}
 			} else if ('?' == input[2]) {
 				r_core_cmd_help (core, help_msg_oon);
@@ -1655,7 +1703,6 @@ static int cmd_open(void *data, const char *input) {
 			break;
 		case '\0': // "oo"
 			if (core && core->io && core->io->desc) {
-				//does not work for debugging
 				int fd;
 				if ((ptr = strrchr (input, ' ')) && ptr[1]) {
 					fd = (int)r_num_math (core->num, ptr + 1);
@@ -1665,15 +1712,21 @@ static int cmd_open(void *data, const char *input) {
 				if (r_config_get_i (core->config, "cfg.debug")) {
 					RBinFile *bf = r_bin_cur (core->bin);
 					if (bf && r_file_exists (bf->file)) {
-						char *file = strdup (bf->file);
+						// Escape spaces so that o's argv parse will detect the path properly
+						char *file = r_str_path_escape (bf->file);
+						// Backup the baddr and sections that were already rebased to
+						// revert the rebase after the debug session is closed
+						ut64 orig_baddr = core->bin->cur->o->baddr_shift;
+						RList *orig_sections = __save_old_sections (core);
+
 						r_core_cmd0 (core, "ob-*");
 						r_io_close_all (core->io);
 						r_config_set (core->config, "cfg.debug", "false");
-						ut64 orig_baddr = sdb_num_get (core->sdb, "orig_baddr", 0);
-						r_bin_set_baddr (core->bin, orig_baddr);
-						r_config_set_i (core->config, "bin.baddr", orig_baddr);
-						r_core_bin_rebase (core, orig_baddr);
 						r_core_cmdf (core, "o %s", file);
+
+						r_core_block_read (core);
+						__rebase_everything (core, orig_sections, orig_baddr);
+						r_list_free (orig_sections);
 						free (file);
 					} else {
 						eprintf ("Nothing to do.\n");
@@ -1695,16 +1748,16 @@ static int cmd_open(void *data, const char *input) {
 				eprintf ("This command is disabled in sandbox mode\n");
 				return 0;
 			}
-			if (core->current_task != core->main_task) {
+			if (core->tasks.current_task != core->tasks.main_task) {
 				eprintf ("This command can only be executed on the main task!\n");
 				return 0;
 			}
 			// memleak? lose all settings wtf
 			// if load fails does not fallbacks to previous file
-			r_core_task_sync_end (core);
+			r_core_task_sync_end (&core->tasks);
 			r_core_fini (core);
 			r_core_init (core);
-			r_core_task_sync_begin (core);
+			r_core_task_sync_begin (&core->tasks);
 			if (!r_core_file_open (core, input + 2, R_PERM_R, 0)) {
 				eprintf ("Cannot open file\n");
 			}
@@ -1726,6 +1779,7 @@ static int cmd_open(void *data, const char *input) {
 				}
 			}
 			if ((fdx == -1) || (fd == -1) || (fdx == fd)) {
+				free (inp);
 				break;
 			}
 			r_io_desc_exchange (core->io, fd, fdx);

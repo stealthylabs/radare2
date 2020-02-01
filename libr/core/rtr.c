@@ -223,7 +223,7 @@ static void activateDieTime (RCore *core) {
 	int dt = r_config_get_i (core->config, "http.dietime");
 	if (dt > 0) {
 #if __UNIX__
-		signal (SIGALRM, dietime);
+		r_sys_signal (SIGALRM, dietime);
 		alarm (dt);
 #else
 		eprintf ("http.dietime only works on *nix systems\n");
@@ -1015,6 +1015,8 @@ R_API void r_core_rtr_cmd(RCore *core, const char *input) {
 				RT->input = strdup (input + 1);
 				//RapThread rt = { core, strdup (input + 1) };
 				rapthread = r_th_new (r_core_rtr_rap_thread, RT, false);
+				int cpuaff = (int)r_config_get_i (core->config, "cfg.cpuaffinity");
+				r_th_setaffinity (rapthread, cpuaff);
 				r_th_setname (rapthread, "rapthread");
 				r_th_start (rapthread, true);
 				eprintf ("Background rap server started.\n");
@@ -1047,7 +1049,11 @@ R_API void r_core_rtr_cmd(RCore *core, const char *input) {
 			return;
 		}
 		r_socket_close (s);
-		r_socket_connect (s, rh->host, sdb_fmt ("%d", rh->port), R_SOCKET_PROTO_TCP, 0);
+		if (!r_socket_connect (s, rh->host, sdb_fmt ("%d", rh->port), R_SOCKET_PROTO_TCP, 0)) {
+			eprintf ("Error: Cannot connect to '%s' (%d)\n", rh->host, rh->port);
+			r_socket_free (s);
+			return;
+		}
 		r_socket_write (s, (ut8*)cmd, cmd_len);
 		r_socket_write (s, "\n", 2);
 		int maxlen = 4096; // r_read_le32 (blen);

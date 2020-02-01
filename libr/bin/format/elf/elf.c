@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2008-2019 - nibble, pancake, alvaro_fe */
+/* radare - LGPL - Copyright 2008-2020 - nibble, pancake, alvaro_fe */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -1861,10 +1861,21 @@ ut64 Elf_(r_bin_elf_get_fini_offset)(ELFOBJ *bin) {
 	return 0;
 }
 
+static bool isExecutable(ELFOBJ *bin) {
+	switch (bin->ehdr.e_type) {
+	case ET_EXEC: return true;
+	case ET_DYN:  return true;
+	}
+	return false;
+}
+
 ut64 Elf_(r_bin_elf_get_entry_offset)(ELFOBJ *bin) {
 	r_return_val_if_fail (bin, UT64_MAX);
 	ut64 entry = bin->ehdr.e_entry;
 	if (!entry) {
+		if (!isExecutable (bin)) {
+			return UT64_MAX;
+		}
 		entry = Elf_(r_bin_elf_get_section_offset)(bin, ".init.text");
 		if (entry != UT64_MAX) {
 			return entry;
@@ -2348,11 +2359,8 @@ char* Elf_(r_bin_elf_get_machine_name)(ELFOBJ *bin) {
 }
 
 char* Elf_(r_bin_elf_get_file_type)(ELFOBJ *bin) {
-	ut32 e_type;
-	if (!bin) {
-		return NULL;
-	}
-	e_type = (ut32)bin->ehdr.e_type; // cast to avoid warn in iphone-gcc, must be ut16
+	r_return_val_if_fail (bin, NULL);
+	ut32 e_type = (ut32)bin->ehdr.e_type; // cast to avoid warn in iphone-gcc, must be ut16
 	switch (e_type) {
 	case ET_NONE: return strdup ("NONE (None)");
 	case ET_REL:  return strdup ("REL (Relocatable file)");
@@ -2931,6 +2939,7 @@ static bool is_special_arm_symbol(ELFOBJ *bin, Elf_(Sym) *sym, const char *name)
 	case 'a':
 	case 't':
 	case 'd':
+	case 'x':
 		return (name[2] == '\0' || name[2] == '.') &&
 			ELF_ST_TYPE (sym->st_info) == STT_NOTYPE &&
 			ELF_ST_BIND (sym->st_info) == STB_LOCAL &&
@@ -2943,6 +2952,7 @@ static bool is_special_arm_symbol(ELFOBJ *bin, Elf_(Sym) *sym, const char *name)
 static bool is_special_symbol(ELFOBJ *bin, Elf_(Sym) *sym, const char *name) {
 	switch (bin->ehdr.e_machine) {
 	case EM_ARM:
+	case EM_AARCH64:
 		return is_special_arm_symbol (bin, sym, name);
 	default:
 		return false;
@@ -3348,9 +3358,10 @@ RBinSymbol *Elf_(_r_bin_elf_convert_symbol)(struct Elf_(r_bin_elf_obj_t) *bin,
 		return NULL;
 	}
 	ptr->name = symbol->name[0] ? r_str_newf (namefmt, &symbol->name[0]) : strdup ("");
-	ptr->forwarder = r_str_const ("NONE");
-	ptr->bind = r_str_const (symbol->bind);
-	ptr->type = r_str_const (symbol->type);
+	ptr->forwarder = "NONE";
+	ptr->bind = symbol->bind;
+	ptr->type = symbol->type;
+	ptr->is_imported = symbol->is_imported;
 	ptr->paddr = paddr;
 	ptr->vaddr = vaddr;
 	ptr->size = symbol->size;
@@ -3703,7 +3714,7 @@ ELFOBJ* Elf_(r_bin_elf_new_buf)(RBuffer *buf, bool verbose) {
 	ELFOBJ *bin = R_NEW0 (ELFOBJ);
 	if (bin) {
 		bin->kv = sdb_new0 ();
-		bin->size = (ut32)r_buf_size (buf);
+		bin->size = r_buf_size (buf);
 		bin->verbose = verbose;
 		bin->b = r_buf_ref (buf);
 		if (!elf_init (bin)) {
@@ -3942,9 +3953,8 @@ char *Elf_(r_bin_elf_compiler)(ELFOBJ *bin) {
 	if (!section) {
 		return NULL;
 	}
-
 	ut64 off = section->offset;
-	int sz = section->size;
+	ut32 sz = R_MIN (section->size, 128);
 	if (sz < 1) {
 		return NULL;
 	}
@@ -3956,20 +3966,14 @@ char *Elf_(r_bin_elf_compiler)(ELFOBJ *bin) {
 		free (buf);
 		return NULL;
 	}
-
+	const size_t buflen = strlen (buf);
+	char *nullbyte = buf + buflen;
+	if (nullbyte[1] && buflen < sz) {
+		nullbyte[0] = ' ';
+	}
 	buf[sz] = 0;
-	char *ptr = buf;
-
-	do {
-		char *p = strchr (ptr, '\0');
-		size_t psz = (p - ptr);
-		ptr = p;
-		sz -= psz + 1;
-		if (sz > 1) {
-			*ptr = '/';
-			ptr++;
-		}
-	} while (sz > 0);
-
-	return buf;
+	r_str_trim (buf);
+	char * res = r_str_escape (buf);
+	free (buf);
+	return res;
 }

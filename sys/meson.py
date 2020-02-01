@@ -170,7 +170,7 @@ def win_dist(args):
     r2_bat_fname = args.install + r'\bin\r2.bat'
     log.debug('create "%s"', r2_bat_fname)
     with open(r2_bat_fname, 'w') as r2_bat:
-        r2_bat.write('@"%s\\bin\\radare2" %%*\n' % os.path.abspath(args.install))
+        r2_bat.write('@"%~dp0\\radare2" %*\n')
 
     copy(r'{BUILDDIR}\libr\*\*.dll', r'{DIST}\bin')
     makedirs(r'{DIST}\{R2_LIBDIR}')
@@ -229,11 +229,14 @@ def build(args):
               release=args.release, shared=args.shared, options=options)
     if args.backend != 'ninja':
         # XP support was dropped in Visual Studio 2019 v142 platform
-        if args.backend != 'vs2019' and args.xp:
+        if args.backend == 'vs2017' and args.xp:
             xp_compat(r2_builddir)
         if not args.project:
             project = os.path.join(r2_builddir, 'radare2.sln')
-            msbuild(project, '/m')
+            params = ['/m']
+            if args.backend == 'vs2017' and args.xp:
+                params.append('/p:XPDeprecationWarning=false')
+            msbuild(project, *params)
     else:
         ninja(r2_builddir)
 
@@ -254,8 +257,10 @@ def main():
 
     # Create parser
     parser = argparse.ArgumentParser(description='Mesonbuild scripts for radare2')
-    parser.add_argument('--asan', action='store_true',
-            help='Build radare2 with ASAN support.')
+    # --sanitize=address,signed-integer-overflow for faster build
+    parser.add_argument('--sanitize', nargs='?',
+            const='address,undefined,signed-integer-overflow', metavar='sanitizers',
+            help='Build radare2 with sanitizer support (default: %(const)s)')
     parser.add_argument('--project', action='store_true',
             help='Create a visual studio project and do not build.')
     parser.add_argument('--release', action='store_true',
@@ -294,19 +299,19 @@ def main():
     if args.alias:
         print("alias m=\"" + os.path.abspath(__file__) + "\"")
         sys.exit(0);
-    if args.asan:
+    if args.sanitize:
         if os.uname().sysname == 'OpenBSD':
-            log.error("Asan insupported under OpenBSD")
+            log.error("Sanitizers unsupported under OpenBSD")
             sys.exit(1)
         cflags = os.environ.get('CFLAGS')
         if not cflags:
             cflags = ''
-        os.environ['CFLAGS'] = cflags + ' -fsanitize=address'
+        os.environ['CFLAGS'] = cflags + ' -fsanitize=' + args.sanitize
         if os.uname().sysname != 'Darwin':
           ldflags = os.environ.get('LDFLAGS')
           if not ldflags:
               ldflags = ''
-          os.environ['LDFLAGS'] = ldflags + ' -lasan'
+          os.environ['LDFLAGS'] = ldflags + ' -fsanitize=' + args.sanitize
 
     # Check arguments
     if args.pull:

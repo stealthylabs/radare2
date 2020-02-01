@@ -282,6 +282,7 @@ R_API RFlag *r_flag_free(RFlag *f) {
 	sdb_free (f->tags);
 	r_spaces_fini (&f->spaces);
 	r_num_free (f->num);
+	r_list_free (f->zones);
 	free (f);
 	return NULL;
 }
@@ -309,7 +310,10 @@ static bool print_flag_json(RFlagItem *flag, void *user) {
 		return true;
 	}
 	pj_o (u->pj);
-	pj_ks (u->pj, "name", u->real ? flag->realname : flag->name);
+	pj_ks (u->pj, "name", flag->name);
+	if (flag->name != flag->realname) {
+		pj_ks (u->pj, "realname", flag->realname);
+	}
 	pj_ki (u->pj, "size", flag->size);
 	if (flag->alias) {
 		pj_ks (u->pj, "alias", flag->alias);
@@ -762,6 +766,14 @@ R_API void r_flag_item_set_realname(RFlagItem *item, const char *realname) {
 	item->realname = R_STR_ISEMPTY (realname)? NULL: strdup (realname);
 }
 
+/* add/replace/remove the color of a flag item */
+R_API const char *r_flag_item_set_color(RFlagItem *item, const char *color) {
+	r_return_val_if_fail (item, NULL);
+	free (item->color);
+	item->color = (color && *color) ? strdup (color) : NULL;
+	return item->color;
+}
+
 /* change the name of a flag item, if the new name is available.
  * true is returned if everything works well, false otherwise */
 R_API int r_flag_rename(RFlag *f, RFlagItem *item, const char *name) {
@@ -882,16 +894,6 @@ R_API bool r_flag_move(RFlag *f, ut64 at, ut64 to) {
 	return false;
 }
 
-R_API const char *r_flag_color(RFlag *f, RFlagItem *it, const char *color) {
-	r_return_val_if_fail (f && it, NULL);
-	if (!color) {
-		return it->color;
-	}
-	free (it->color);
-	it->color = *color ? strdup (color) : NULL;
-	return it->color;
-}
-
 // BIND
 R_API void r_flag_bind(RFlag *f, RFlagBind *fb) {
 	r_return_if_fail (f && fb);
@@ -927,10 +929,12 @@ R_API int r_flag_count(RFlag *f, const char *glob) {
 	RListIter *it2, *tmp2;	  \
 	RFlagItem *fi; \
 	r_skiplist_foreach_safe (f->by_off, it, tmp, flags_at) { \
-		r_list_foreach_safe (flags_at->flags, it2, tmp2, fi) {	\
-			if (condition) { \
-				if (!cb (fi, user)) { \
-					return; \
+		if (flags_at) { \
+			r_list_foreach_safe (flags_at->flags, it2, tmp2, fi) {	\
+				if (condition) { \
+					if (!cb (fi, user)) { \
+						return; \
+					} \
 				} \
 			} \
 		} \

@@ -48,12 +48,14 @@ r_util_sources = [
   'randomart.c',
   'range.c',
   'rbtree.c',
+  'intervaltree.c',
   'sandbox.c',
   'signal.c',
   'skiplist.c',
   'spaces.c',
   'stack.c',
   'str.c',
+  'str_constpool.c',
   'str_trim.c',
   'strbuf.c',
   'strpool.c',
@@ -76,6 +78,7 @@ r_util_sources = [
   'vector.c',
   'w32-sys.c',
   'zip.c',
+  'protobuf.c',
   'regex/regcomp.c',
   'regex/regexec.c',
   'regex/regerror.c'
@@ -89,7 +92,7 @@ endif
 
 r_util = library('r_util', r_util_sources,
   include_directories: platform_inc,
-  c_args: library_cflags,
+  c_args: library_cflags + ['-DR_UTIL_SRC=1'],
   dependencies: r_util_deps,
   install: true,
   implicit_include_directories: false,
@@ -98,11 +101,6 @@ r_util = library('r_util', r_util_sources,
 
 r_util_dep = declare_dependency(link_with: r_util,
                                 include_directories: platform_inc)
-
-# Override sdb_dep since r_util exports all sdb symbols
-if host_machine.system() == 'windows'
-  sdb_dep = r_util_dep
-endif
 
 pkgconfig_mod.generate(r_util,
   subdirs: 'libr',
