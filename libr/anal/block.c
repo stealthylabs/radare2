@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2019 - pancake, thestr4ng3r */
+/* radare - LGPL - Copyright 2019-2020 - pancake, thestr4ng3r */
 
 #include <r_anal.h>
 
@@ -39,7 +39,6 @@ R_API void r_anal_block_ref(RAnalBlock *bb) {
 	bb->ref++;
 }
 
-
 #define DFLT_NINSTR 3
 
 static RAnalBlock *block_new(RAnal *a, ut64 addr, ut64 size) {
@@ -53,7 +52,6 @@ static RAnalBlock *block_new(RAnal *a, ut64 addr, ut64 size) {
 	block->ref = 1;
 	block->jump = UT64_MAX;
 	block->fail = UT64_MAX;
-	block->type = R_ANAL_BB_TYPE_NULL;
 	block->op_pos = R_NEWS0 (ut16, DFLT_NINSTR);
 	block->op_pos_size = DFLT_NINSTR;
 	block->stackptr = 0;
@@ -73,7 +71,6 @@ static void block_free(RAnalBlock *block) {
 	free (block->op_bytes);
 	r_anal_switch_op_free (block->switch_op);
 	r_list_free (block->fcns);
-	free (block->label);
 	free (block->op_pos);
 	free (block->parent_reg_arena);
 	free (block);
@@ -86,10 +83,7 @@ void __block_free_rb(RBNode *node, void *user) {
 
 R_API RAnalBlock *r_anal_get_block_at(RAnal *anal, ut64 addr) {
 	RBNode *node = r_rbtree_find (anal->bb_tree, &addr, __bb_addr_cmp, NULL);
-	if (!node) {
-		return NULL;
-	}
-	return unwrap (node);
+	return node? unwrap (node): NULL;
 }
 
 // This is a special case of what r_interval_node_all_in() does
@@ -132,10 +126,9 @@ static bool block_list_cb(RAnalBlock *block, void *user) {
 
 R_API RList *r_anal_get_blocks_in(RAnal *anal, ut64 addr) {
 	RList *list = r_list_newf ((RListFree)r_anal_block_unref);
-	if (!list) {
-		return NULL;
+	if (list) {
+		r_anal_blocks_foreach_in (anal, addr, block_list_cb, list);
 	}
-	r_anal_blocks_foreach_in (anal, addr, block_list_cb, list);
 	return list;
 }
 
@@ -271,14 +264,12 @@ R_API RAnalBlock *r_anal_block_split(RAnalBlock *bbi, ut64 addr) {
 	}
 	bb->jump = bbi->jump;
 	bb->fail = bbi->fail;
-	bb->conditional = bbi->conditional;
 	bb->parent_stackptr = bbi->stackptr;
 
 	// resize the first block
 	r_anal_block_set_size (bbi, addr - bbi->addr);
 	bbi->jump = addr;
 	bbi->fail = UT64_MAX;
-	bbi->conditional = false;
 
 	// insert the second block into the tree
 	r_rbtree_aug_insert (&anal->bb_tree, &bb->addr, &bb->_rb, __bb_addr_cmp, NULL, __max_end);
@@ -287,7 +278,7 @@ R_API RAnalBlock *r_anal_block_split(RAnalBlock *bbi, ut64 addr) {
 	RListIter *iter;
 	RAnalFunction *fcn;
 	r_list_foreach (bbi->fcns, iter, fcn) {
-			r_anal_function_add_block (fcn, bb);
+		r_anal_function_add_block (fcn, bb);
 	}
 
 	// recalculate offset of instructions in both bb and bbi
@@ -359,6 +350,9 @@ R_API bool r_anal_block_merge(RAnalBlock *a, RAnalBlock *b) {
 }
 
 R_API void r_anal_block_unref(RAnalBlock *bb) {
+	if (!bb) {
+		return;
+	}
 	assert (bb->ref > 0);
 	bb->ref--;
 	assert (bb->ref >= r_list_length (bb->fcns)); // all of the block's functions must hold a reference to it
@@ -454,9 +448,98 @@ static bool recurse_list_cb(RAnalBlock *block, void *user) {
 
 R_API RList *r_anal_block_recurse_list(RAnalBlock *block) {
 	RList *ret = r_list_newf ((RListFree)r_anal_block_unref);
-	if (!ret) {
-		return NULL;
+	if (ret) {
+		r_anal_block_recurse (block, recurse_list_cb, ret);
 	}
-	r_anal_block_recurse (block, recurse_list_cb, ret);
 	return ret;
 }
+
+R_API void r_anal_block_add_switch_case(RAnalBlock *block, ut64 switch_addr, ut64 case_addr) {
+	if (!block->switch_op) {
+		block->switch_op = r_anal_switch_op_new (switch_addr, 0, 0, 0);
+	}
+	r_anal_switch_op_add_case (block->switch_op, case_addr, 0, case_addr);
+}
+
+
+typedef struct {
+	RAnal *anal;
+	RAnalBlock *cur_parent;
+	ut64 dst;
+	RPVector/*<RAnalBlock>*/ *next_visit; // accumulate block of the next level in the tree
+	HtUP/*<RAnalBlock>*/ *visited; // maps addrs to their previous block (or NULL for entry)
+} PathContext;
+
+static bool shortest_path_successor_cb(ut64 addr, void *user) {
+	PathContext *ctx = user;
+	if (ht_up_find_kv (ctx->visited, addr, NULL)) {
+		// already visited
+		return true;
+	}
+	ht_up_insert (ctx->visited, addr, ctx->cur_parent);
+	RAnalBlock *block = r_anal_get_block_at (ctx->anal, addr);
+	if (block) {
+		r_pvector_push (ctx->next_visit, block);
+	}
+	return addr != ctx->dst; // break if we found our destination
+}
+
+
+R_API R_NULLABLE RList/*<RAnalBlock *>*/ *r_anal_block_shortest_path(RAnalBlock *block, ut64 dst) {
+	RList *ret = NULL;
+	PathContext ctx;
+	ctx.anal = block->anal;
+	ctx.dst = dst;
+
+	// two vectors to swap cur_visit/next_visit
+	RPVector visit_a;
+	r_pvector_init (&visit_a, NULL);
+	RPVector visit_b;
+	r_pvector_init (&visit_b, NULL);
+	ctx.next_visit = &visit_a;
+	RPVector *cur_visit = &visit_b; // cur visit is the current level in the tree
+
+	ctx.visited = ht_up_new0 ();
+	if (!ctx.visited) {
+		goto beach;
+	}
+
+	ht_up_insert (ctx.visited, block->addr, NULL);
+	r_pvector_push (cur_visit, block);
+
+	// BFS
+	while (!r_pvector_empty (cur_visit)) {
+		void **it;
+		r_pvector_foreach (cur_visit, it) {
+			RAnalBlock *cur = *it;
+			ctx.cur_parent = cur;
+			r_anal_block_successor_addrs_foreach (cur, shortest_path_successor_cb, &ctx);
+		}
+		RPVector *tmp = cur_visit;
+		cur_visit = ctx.next_visit;
+		ctx.next_visit = tmp;
+		r_pvector_clear (ctx.next_visit);
+	}
+
+	// reconstruct the path
+	bool found = false;
+	RAnalBlock *prev = ht_up_find (ctx.visited, dst, &found);
+	RAnalBlock *dst_block = r_anal_get_block_at (block->anal, dst);
+	if (found && dst_block) {
+		ret = r_list_newf ((RListFree)r_anal_block_unref);
+		r_anal_block_ref (dst_block);
+		r_list_prepend (ret, dst_block);
+		while (prev) {
+			r_anal_block_ref (prev);
+			r_list_prepend (ret, prev);
+			prev = ht_up_find (ctx.visited, prev->addr, NULL);
+		}
+	}
+
+beach:
+	ht_up_free (ctx.visited);
+	r_pvector_clear (&visit_a);
+	r_pvector_clear (&visit_b);
+	return ret;
+}
+

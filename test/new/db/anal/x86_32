@@ -254,8 +254,15 @@ EXPECT=<<EOF
 |           0x0804843e      ff75f0         push dword [var_10h]
 |           0x08048441      ff75f4         push dword [var_ch]
 EOF
+CMDS=aa ; s sym.fastcaslled ; afc fastcall ; afva ; ?e ; pdf~arg,var
+RUN
+
+NAME=adf bug #16215
+FILE=-
+EXPECT=<<EOF
+EOF
 CMDS=<<EOF
-aa ; s sym.fastcaslled ; afc fastcall ; afva ; ?e ; pdf~arg,var
+adf
 EOF
 RUN
 
@@ -394,7 +401,7 @@ EXPECT=<<EOF
 0x004010e4    4 148          fcn.004010e4
 0x004010c7    1 29           fcn.004010c7
 0x0040104a    4 109          fcn.0040104a
-0x0040103b    3 15   -> 277  fcn.0040103b
+0x0040103b    3 15           fcn.0040103b
 0x00401335    3 262          loc.00401335
 0x00404ad7    1 8            fcn.00404ad7
 EOF
@@ -412,7 +419,7 @@ EXPECT=<<EOF
 0x004010e4    4 148          root.004010e4
 0x004010c7    1 29           root.004010c7
 0x0040104a    4 109          root.0040104a
-0x0040103b    3 15   -> 277  root.0040103b
+0x0040103b    3 15           root.0040103b
 0x00401335    3 262          loc.00401335
 0x00404ad7    1 8            root.00404ad7
 EOF
@@ -468,9 +475,7 @@ FILE=-
 EXPECT=<<EOF
 0
 EOF
-CMDS=<<EOF
-af+ $$ foo; af- $$;afl~?
-EOF
+CMDS=af+ $$ foo; af- $$;afl~?
 RUN
 
 NAME=anal.recont=true
@@ -2803,16 +2808,12 @@ _IO_2_1_stdout_
 _IO_2_1_stdin_
 0x00024480
 EOF
-CMDS=<<EOF
-ir~0x[3]
-EOF
+CMDS=ir~0x[3]
 RUN
 
 NAME=get function in, node before entry
 FILE=../bins/elf/fcn_in_test.elf
-CMDS=<<EOF
-e asm.lines=false;e asm.comments=false;af @ main; pdr @ 0x1180
-EOF
+CMDS=e asm.lines=false;e asm.comments=false;af @ main; pdr @ 0x1180
 EXPECT=<<EOF
 ;-- start2:
 0x00001180      31c0           xor eax, eax
@@ -2850,8 +2851,9 @@ RUN
 
 NAME=arj x86 32 bits
 FILE=malloc://0x100
-EXPECT='{"oeax":0,"eax":0,"ebx":0,"ecx":0,"edx":0,"esi":0,"edi":0,"esp":0,"ebp":0,"eip":0,"eflags":0}
-'
+EXPECT=<<EOF
+{"oeax":0,"eax":0,"ebx":0,"ecx":0,"edx":0,"esi":0,"edi":0,"esp":0,"ebp":0,"eip":0,"eflags":0}
+EOF
 CMDS=<<EOF
 e asm.arch = x86
 e anal.arch = x86
@@ -3094,7 +3096,8 @@ RUN
 
 NAME=aoj 31c0
 FILE=-
-EXPECT='[
+EXPECT=<<EOF
+[
   {
     "opcode": "xor eax, eax",
     "disasm": "xor eax, eax",
@@ -3136,11 +3139,59 @@ EXPECT='[
     "family": "cpu"
   }
 ]
-'
+EOF
 CMDS=<<EOF
 e asm.arch=x86
 e asm.bits=32
 wx 31c0
+aoj~{}
+EOF
+RUN
+
+NAME=aoj pushf
+FILE=-
+EXPECT=<<EOF
+[
+  {
+    "opcode": "pushf",
+    "disasm": "pushf",
+    "pseudo": "pushf ",
+    "description": "push flags register onto the stack",
+    "mnemonic": "pushf",
+    "mask": "ffff",
+    "esil": "4,esp,-=,eflags,esp,=[4]",
+    "sign": false,
+    "prefix": 0,
+    "id": 591,
+    "opex": {
+      "operands": [
+        {
+          "size": 4,
+          "rw": 1,
+          "type": "reg",
+          "value": "eflags"
+        }
+      ]
+    },
+    "addr": 0,
+    "bytes": "669c",
+    "size": 2,
+    "type": "upush",
+    "scale": 0,
+    "refptr": 0,
+    "cycles": 2,
+    "failcycles": 0,
+    "delay": 0,
+    "stack": "inc",
+    "stackptr": 4,
+    "family": "cpu"
+  }
+]
+EOF
+CMDS=<<EOF
+e asm.arch=x86
+e asm.bits=32
+wx 669c
 aoj~{}
 EOF
 RUN
@@ -3164,6 +3215,7 @@ pd 38
 EOF
 EXPECT=<<EOF
 ┌ (fcn) fcn.00000000 1645
+// void fcn.00000000 (int32_t arg_4h, int32_t arg_1ch, int32_t arg_2ch);
 │           ; var int32_t var_30h @ esp+0x1c
 │           ; var int32_t var_20h @ esp+0x2c
 │           ; arg int32_t arg_4h @ esp+0x50
@@ -3229,6 +3281,7 @@ pd 38
 EOF
 EXPECT=<<EOF
 / (fcn) fcn.00000000 1645
+// void fcn.00000000 (int32_t arg_4h, int32_t arg_1ch, int32_t arg_2ch);
 |           ; var int32_t var_30h @ esp+0x1c
 |           ; var int32_t var_20h @ esp+0x2c
 |           ; arg int32_t arg_4h @ esp+0x50
@@ -3294,6 +3347,7 @@ NAME=afva for esp based vars
 FILE=malloc://1024
 EXPECT=<<EOF
 / (fcn) fcn.00000000 89
+// void fcn.00000000 (int32_t arg_4h, int32_t arg_8h, int32_t arg_ch, int32_t arg_10h, int32_t arg_18h, int32_t arg_1ch);
 |           ; var int32_t var_ch @ esp+0x4
 |           ; var int32_t var_8h @ esp+0x8
 |           ; var int32_t var_4h @ esp+0xc

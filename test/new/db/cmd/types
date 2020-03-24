@@ -96,6 +96,7 @@ s sym.Java_com_app_ndh_NDHActivity_print
 to ../bins/headers/jni.h
 tl JNINativeInterface = 0x464c457f
 pdf~JNINativeInterface
+pdr~JNI?
 EOF
 EXPECT=<<EOF
 | ; var struct JNINativeInterface @ sp+0x12c
@@ -110,14 +111,13 @@ EXPECT=<<EOF
 | 0x0000112e      d258           ldr r2, [r2, r3]                      ; JNINativeInterface.NewStringUTF
 | 0x00001144      4b9a           ldr r2, [sp + JNINativeInterface]
 | 0x00001148      9a42           cmp r2, r3                            ; JNINativeInterface.reserved0
+12
 EOF
 RUN
 
 NAME=t
 FILE=-
-CMDS=<<EOF
-t~char,double,float,int,long,short,size,uid,void # basic universal types
-EOF
+CMDS=t~char,double,float,int,long,short,size,uid,void # basic universal types
 EXPECT=<<EOF
 char
 char *
@@ -473,9 +473,7 @@ RUN
 
 NAME=tk - crash
 FILE=-
-CMDS=<<EOF
-tk -!!!! d'B%CCCC!9!!!!_
-EOF
+CMDS=tk -!!!! d'B%CCCC!9!!!!_
 EXPECT=<<EOF
 0x0
 EOF
@@ -1476,9 +1474,38 @@ afs
 afs
 EOF
 EXPECT=<<EOF
-fcn.004e2420 (int64_t arg1, int64_t arg2, int64_t arg3, int64_t arg4, int64_t arg5, int64_t arg6, int64_t arg_8h);
+void fcn.004e2420 (int64_t arg1, int64_t arg2, int64_t arg3, int64_t arg4, int64_t arg5, int64_t arg6, int64_t arg_8h);
 int32_t no_type (int32_t a, char **b);
 char type (int32_t a, char **b);
+EOF
+RUN
+
+NAME=afs fcnname with dots
+FILE=../bins/elf/hello_world
+CMDS=<<EOF
+af
+afs
+"afs foo.bar();"
+afs
+"afs char foo.bar(int a, ...);"
+afs
+EOF
+EXPECT=<<EOF
+void entry0 (int64_t arg3);
+int32_t foo.bar ();
+char foo.bar (int32_t a);
+EOF
+RUN
+
+NAME=afs sym.imp.*
+FILE=../bins/elf/hello_world
+CMDS=<<EOF
+s sym.imp.strlen
+af
+afs
+EOF
+EXPECT=<<EOF
+size_t strlen (const char *s);
 EOF
 RUN
 
@@ -1543,5 +1570,23 @@ tk union.foo.b=char,0,0
 tk union.foo.b.meta=2
 pf dc a b
 pf.foo dc a b
+EOF
+RUN
+
+NAME=td uint64_t
+FILE=-
+CMDS=<<EOF
+wx 0xa00f
+wx 0x401f @ 0x4
+wx 0800000000000080 @ 0x8
+"td struct foo {int a; int b; uint64_t c;};"
+tl foo @ 0x0
+pd 1
+EOF
+EXPECT=<<EOF
+(foo)
+ a : 0x00000000 = 4000
+ b : 0x00000004 = 8000
+ c : 0x00000008 = (qword)0x8000000000000008
 EOF
 RUN

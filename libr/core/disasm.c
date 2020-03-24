@@ -1,11 +1,10 @@
-/* radare - LGPL - Copyright 2009-2019 - nibble, pancake, dso */
+/* radare - LGPL - Copyright 2009-2020 - nibble, pancake, dso */
 
 #include "r_core.h"
 
 #define HASRETRY 1
 #define HAVE_LOCALS 1
 #define DEFAULT_NARGS 4
-// #define FLAG_PREFIX "; "
 #define FLAG_PREFIX ";-- "
 
 #define COLOR(ds, field) ((ds)->show_color ? (ds)->field : "")
@@ -391,7 +390,7 @@ static void ds_print_ref_lines(char *line, char *line_col, RDisasmState *ds) {
 			}
 		} else {
 			len = strlen (line);
-			for (i = 0; i < len; ++i) {
+			for (i = 0; i < len; i++) {
 				r_cons_printf ("%s", get_utf8_char (line[i], ds));
 			}
 		}
@@ -1151,29 +1150,15 @@ static void ds_build_op_str(RDisasmState *ds, bool print_color) {
 	}
 }
 
-//removed hints bits from since r_anal_build_range_on_hints along with
-//r_core_seek_archbits will be used instead. The ranges are built from hints
 R_API RAnalHint *r_core_hint_begin(RCore *core, RAnalHint* hint, ut64 at) {
-	static char *hint_arch = NULL;
 	static char *hint_syntax = NULL;
 	r_anal_hint_free (hint);
 	hint = r_anal_hint_get (core->anal, at);
-	if (hint_arch) {
-		r_config_set (core->config, "asm.arch", hint_arch);
-		hint_arch = NULL;
-	}
 	if (hint_syntax) {
 		r_config_set (core->config, "asm.syntax", hint_syntax);
 		hint_syntax = NULL;
 	}
 	if (hint) {
-		/* arch */
-		if (hint->arch && !core->fixedarch) {
-			if (!hint_arch) {
-				hint_arch = strdup (r_config_get (core->config, "asm.arch"));
-			}
-			r_config_set (core->config, "asm.arch", hint->arch);
-		}
 		/* syntax */
 		if (hint->syntax) {
 			if (!hint_syntax) {
@@ -1787,12 +1772,18 @@ static void printVarSummary(RDisasmState *ds, RList *list) {
 	ds_newline (ds);
 }
 
+static bool empty_signature(const char *s) {
+	if (s && !strncmp (s, "void ", 5) && strstr (s, "()")) {
+		return true;
+	}
+	return false;
+}
+
 static void ds_show_functions(RDisasmState *ds) {
 	RAnalFunction *f;
 	RCore *core = ds->core;
 	char *fcn_name;
 	bool fcn_name_alloc = false; // whether fcn_name needs to be freed by this function
-	char *sign;
 
 	if (!ds->show_functions) {
 		return;
@@ -1818,7 +1809,10 @@ static void ds_show_functions(RDisasmState *ds) {
 	}
 
 	ds_begin_line (ds);
-	sign = r_anal_fcn_to_string (core->anal, f);
+	char *sign = r_anal_function_get_signature (f);
+	if (empty_signature (sign)) {
+		R_FREE (sign);
+	}
 	if (f->type == R_ANAL_FCN_TYPE_LOC) {
 		r_cons_printf ("%s%s ", COLOR (ds, color_fline),
 			core->cons->vline[LINE_CROSS]); // |-
@@ -2242,6 +2236,7 @@ static void ds_show_flags(RDisasmState *ds) {
 	bool outline = !ds->flags_inline;
 	const char *comma = "";
 	bool keep_lib = r_config_get_i (core->config, "bin.demangle.libs");
+	bool docolon = true;
 	int nth = 0;
 	r_list_foreach (uniqlist, iter, flag) {
 		if (f && f->addr == flag->offset && !strcmp (flag->name, f->name)) {
@@ -2330,6 +2325,8 @@ static void ds_show_flags(RDisasmState *ds) {
 				case_prev = case_current;
 				ds_align_comment (ds);
 				r_cons_printf ("%s; from %s", ds->show_color ? ds->pal_comment : "", addr);
+				outline = false;
+				docolon = false;
 			} else {
 				const char *lang = r_config_get (core->config, "bin.lang");
 				char *name = r_bin_demangle (core->bin->cur, lang, flag->realname, flag->offset, keep_lib);
@@ -2370,7 +2367,7 @@ static void ds_show_flags(RDisasmState *ds) {
 		nth++;
 	}
 	if (!outline && *comma) {
-		if (nth > 0) {
+		if (nth > 0 && docolon) {
 			r_cons_printf (":");
 		}
 		ds_newline (ds);
@@ -3730,10 +3727,10 @@ static void ds_print_asmop_payload(RDisasmState *ds, const ut8 *buf) {
 		if (ds->showpayloads) {
 			int mod = ds->asmop.payload % ds->core->assembler->dataalign;
 			int x;
-			for (x = 0; x < ds->asmop.payload; ++x) {
+			for (x = 0; x < ds->asmop.payload; x++) {
 				r_cons_printf ("\n        0x%02x", buf[ds->oplen + x]);
 			}
-			for (x = 0; x < mod; ++x) {
+			for (x = 0; x < mod; x++) {
 				r_cons_printf ("\n        0x%02x ; alignment", buf[ds->oplen + ds->asmop.payload + x]);
 			}
 		}
@@ -5219,7 +5216,6 @@ toro:
 	if (!ds->l) {
 		ds->l = core->blocksize;
 	}
-	r_anal_merge_hint_ranges (core->anal);
 	r_cons_break_push (NULL, NULL);
 	for (i = idx = ret = 0; addrbytes * idx < len && ds->lines < ds->l; idx += inc, i++, ds->index += inc, ds->lines++) {
 		ds->at = ds->addr + idx;
@@ -5736,7 +5732,6 @@ R_API int r_core_print_disasm_instructions(RCore *core, int nb_bytes, int nb_opc
 	if (!ds->l) {
 		ds->l = ds->len;
 	}
-	r_anal_merge_hint_ranges (core->anal);
 	r_cons_break_push (NULL, NULL);
 	//build ranges to map addr with bits
 #define isNotTheEnd (nb_opcodes ? j < nb_opcodes: addrbytes * i < nb_bytes)
@@ -5794,7 +5789,7 @@ R_API int r_core_print_disasm_instructions(RCore *core, int nb_bytes, int nb_opc
 			ds->opstr = strdup (ds->hint->opcode);
 		} else {
 			if (ds->decode && !ds->immtrim) {
-				free (ds->opstr);
+				R_FREE (ds->opstr);
 				if (!hasanal) {
 					r_anal_op (core->anal, &ds->analop, ds->at, core->block+i, core->blocksize-i, R_ANAL_OP_MASK_ALL);
 					hasanal = true;
@@ -5802,6 +5797,7 @@ R_API int r_core_print_disasm_instructions(RCore *core, int nb_bytes, int nb_opc
 				tmpopstr = r_anal_op_to_string (core->anal, &ds->analop);
 				ds->opstr = (tmpopstr)? tmpopstr: strdup (r_asm_op_get_asm (&ds->asmop));
 			} else if (ds->immtrim) {
+				free (ds->opstr);
 				ds->opstr = strdup (r_asm_op_get_asm (&ds->asmop));
 				r_parse_immtrim (ds->opstr);
 			} else if (ds->use_esil) {
@@ -5832,6 +5828,7 @@ R_API int r_core_print_disasm_instructions(RCore *core, int nb_bytes, int nb_opc
 					}
 				}
 				ds_build_op_str (ds, true);
+				free (ds->opstr);
 				ds->opstr = strdup (ds->str);
 				asm_str = colorize_asm_string (core, ds, true);
 				core->parser->flagspace = ofs;
@@ -6044,7 +6041,8 @@ R_API int r_core_print_disasm_json(RCore *core, ut64 addr, ut8 *buf, int nb_byte
 				strcpy (buf, aop);
 				buf = ds_sub_jumps (ds, buf);
 				r_parse_filter (core->parser, ds->vat, core->flags, ds->hint, buf,
-					str, sizeof (str), core->print->big_endian);
+					str, sizeof (str) - 1, core->print->big_endian);
+				str[sizeof (str) - 1] = '\0';
 				r_asm_op_set_asm (&asmop, buf);
 				free (buf);
 			}
@@ -6537,6 +6535,7 @@ toro:
 					}
 					r_cons_println (opstr);
 				}
+				r_anal_op_fini (&analop);
 			} else {
 				char opstr[128] = {
 					0

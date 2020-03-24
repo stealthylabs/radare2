@@ -181,9 +181,7 @@ FILE=malloc://1024
 EXPECT=<<EOF
 Usage: pf [0|cnt][format-string]
 EOF
-CMDS=<<EOF
-pf 16 16
-EOF
+CMDS=pf 16 16
 RUN
 
 NAME=pf refuse space between size and format-string
@@ -191,9 +189,7 @@ FILE=malloc://1024
 EXPECT=<<EOF
 Usage: pf [0|cnt][format-string]
 EOF
-CMDS=<<EOF
-pf 16 16
-EOF
+CMDS=pf 16 16
 RUN
 
 NAME=pf field name
@@ -206,9 +202,7 @@ EXPECT=<<EOF
    x2 : 0x00000004 = 0x00000000
 }
 EOF
-CMDS=<<EOF
-pf 2x x2
-EOF
+CMDS=pf 2x x2
 RUN
 
 NAME=pf rop64
@@ -314,7 +308,7 @@ NAME=pf/pfj z with size
 FILE=-
 CMDS=<<EOF
 wz ABCDE
-(pf2 format, pf $0, pfj $0)
+(pf2 format; pf $0; pfj $0)
 .(pf2 z)
 ?e
 .(pf2 [3]z)
@@ -455,18 +449,21 @@ RUN
 
 NAME=pf?
 FILE=-
-ONE_STREAM=1
 CMDS=<<EOF
 pfo elf32
 pf?elf_header
 pf? elf_header
-pf?pe_header
 EOF
 EXPECT=<<EOF
 ?[2]E[2]E[4]Exxxxwwwwww (elf_ident)ident (elf_type)type (elf_machine)machine (elf_obj_version)version entry phoff shoff flags ehsize phentsize phnum shentsize shnum shstrndx
 ?[2]E[2]E[4]Exxxxwwwwww (elf_ident)ident (elf_type)type (elf_machine)machine (elf_obj_version)version entry phoff shoff flags ehsize phentsize phnum shentsize shnum shstrndx
-Struct pe_header is not defined
 EOF
+RUN
+
+NAME=pf? struct not defined
+FILE=-
+CMDS=pf?cat_sat_on_keyboard
+EXPECT_ERR=Struct cat_sat_on_keyboard is not defined
 RUN
 
 NAME=-nn filename with @

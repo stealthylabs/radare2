@@ -25,9 +25,7 @@ EXPECT=<<EOF
 0x00001e18 0 imp.__cxa_atexit
 0x00001e1e 0 imp.exit
 EOF
-CMDS=<<EOF
-!rabin2 -qsD cxx all ../bins/mach0/hellocxx-osx-i386
-EOF
+CMDS=!rabin2 -qsD cxx all ../bins/mach0/hellocxx-osx-i386
 RUN
 
 NAME=binsym without demangling
@@ -58,9 +56,7 @@ EXPECT=<<EOF
 0x00001e18 0 imp.__cxa_atexit
 0x00001e1e 0 imp.exit
 EOF
-CMDS=<<EOF
-isq
-EOF
+CMDS=isq
 RUN
 
 NAME=bin.demangle=true and symbol
@@ -69,16 +65,15 @@ ARGS=-e bin.demangle=true
 EXPECT=<<EOF
 call sym.imp.puts
 EOF
-CMDS=<<EOF
-pi 1 @ 0x08048230
-EOF
+CMDS=pi 1 @ 0x08048230
 RUN
 
 NAME=MSVC import symbol demangling
 FILE=../bins/pe/libzmq-v100-mt-4_0_4.dll
 CMDS=f~0x1004e0f4[2]
-EXPECT='sym.imp.MSVCP100.dll_public:_void___thiscall_std::basic_ostream_char__struct_std::char_traits_char__::_Osfx_void
-'
+EXPECT=<<EOF
+sym.imp.MSVCP100.dll_public:_void___thiscall_std::basic_ostream_char__struct_std::char_traits_char__::_Osfx_void
+EOF
 RUN
 
 NAME=C++ demangle relocs
@@ -86,9 +81,7 @@ FILE=../bins/elf/libstdc++.so.6
 EXPECT=<<EOF
             0x00091004      488b159d880f.  mov rdx, qword [reloc.vtable_for_std::bad_alloc] ; [0x1898a8:8]=0
 EOF
-CMDS=<<EOF
-pd 1 @0x00091004
-EOF
+CMDS=pd 1 @0x00091004
 RUN
 
 NAME=C++ demangle exported GLIBCXX symbols
@@ -99,23 +92,23 @@ EXPECT=<<EOF
 5087  0x0008ce50 0x0008ce50 GLOBAL FUNC 609      std::istream::ignore(long)
 5345  0x0008ce50 0x0008ce50 GLOBAL FUNC 609      std::istream::ignore(long)
 EOF
-CMDS=<<EOF
-iE~0x0008ce50
-EOF
+CMDS=iE~0x0008ce50
 RUN
 
 NAME=demangle in irj
 FILE=../bins/elf/demangle-test-cpp
-EXPECT='{"name":"_ZSt20__throw_length_errorPKc","demname":"std::__throw_length_error(char const*)","type":"SET_64","vaddr":16424,"paddr":12328,"is_ifunc":false}
-'
+EXPECT=<<EOF
+{"name":"_ZSt20__throw_length_errorPKc","demname":"std::__throw_length_error(char const*)","type":"SET_64","vaddr":16424,"paddr":12328,"is_ifunc":false}
+EOF
 CMDS=irj~{9}
 RUN
 
 NAME=demangle obj in pd
 FILE=../bins/elf/ch25.bin
-EXPECT='            0x08048aac      c7042460b004.  mov dword [esp], obj.std::cerr ; sym..bss
+EXPECT=<<EOF
+            0x08048aac      c7042460b004.  mov dword [esp], obj.std::cerr ; sym..bss
                                                                        ; [0x804b060:4]=0
-'
+EOF
 CMDS=pd 1 @0x08048aac
 RUN
 
@@ -124,7 +117,7 @@ FILE=../bins/elf/abcde-qt32
 CMDS=<<EOF
 e asm.demangle=true
 e asm.bytes=false
-(pd_calls, pd 1 @ 0x0804921a, pd 1 @ 0x08049249, pd 1 @ 0x08049278)
+(pd_calls; pd 1 @ 0x0804921a; pd 1 @ 0x08049249; pd 1 @ 0x08049278)
 e asm.cmt.right=true
 .(pd_calls)
 ?e

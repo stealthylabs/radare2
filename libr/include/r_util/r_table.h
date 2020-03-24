@@ -18,13 +18,12 @@ typedef struct {
 	int total;
 } RTableColumn;
 
-
 typedef struct {
-    char *name;
-    RInterval pitv;
-    RInterval vitv;
-    int perm;
-    char *extra;
+	char *name;
+	RInterval pitv;
+	RInterval vitv;
+	int perm;
+	char *extra;
 } RListInfo;
 
 enum {
@@ -51,6 +50,7 @@ typedef struct {
 
 R_API void r_table_row_free(void *_row);
 R_API void r_table_column_free(void *_col);
+R_API RTableColumn *r_table_column_clone(RTableColumn *col);
 R_API RTableColumnType *r_table_type (const char *name);
 R_API RTable *r_table_new(void);
 R_API void r_table_free(RTable *t);

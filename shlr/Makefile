@@ -29,12 +29,12 @@ endif
 # NOTE: when you update TS_TIP or TS_BRA, also update them in shlr/meson.build
 TS_URL=https://github.com/tree-sitter/tree-sitter.git
 TS_BRA=master
-TS_TIP=aef62b4bc6b9654e54bd59bee1cb8cea16e3aa96
+TS_TIP=f049ba350f3f6019ce9a1cbb0975ebd154ef7ad3
 
 # NOTE: when you update SHELLPARSER_TIP or SHELLPARSER_BRA, also update them in shlr/meson.build
 SHELLPARSER_URL=https://github.com/ret2libc/radare2-shell-parser.git
 SHELLPARSER_BRA=master
-SHELLPARSER_TIP=110a050947e85b963ef6ea718478dbfe1b840193
+SHELLPARSER_TIP=1a49d280f067b59b1e500f993bf98eb03927dea0
 
 ifeq ($(CS_RELEASE),1)
 CS_VER=4.0.1
@@ -49,10 +49,10 @@ CS_ARCHIVE=https://$(CS_URL_BASE)/archive
 CS_UPD=20190515
 # NOTE: when you update CS_TIP or CS_BRA, also update them in shlr/meson.build
 ifeq ($(CS_NEXT),1)
-CS_TIP=aaffb38c44fa58f510ba9b6264f7079bfbba4c8e
+CS_TIP=0de88ed3fdc0ab1f1e2a6eada3cdd93e18057a0f
 CS_BRA=next
 else
-CS_TIP=c7fe0f8aaaa1bce78cb20491cd08470f570c4237
+CS_TIP=c80b6aaf973c822d82565f25e9b2e2c0102626fa
 CS_BRA=v4
 endif
 ifeq ($(CS_COMMIT_ARCHIVE),1)

@@ -424,6 +424,7 @@ typedef void (*RConsBreakCallback)(void *core);
 typedef void *(*RConsSleepBeginCallback)(void *core);
 typedef void (*RConsSleepEndCallback)(void *core, void *user);
 typedef void (*RConsQueueTaskOneshot)(void *core, void *task, void *user);
+typedef void (*RConsFunctionKey)(void *core, int fkey);
 
 typedef enum { COLOR_MODE_DISABLED = 0, COLOR_MODE_16, COLOR_MODE_256, COLOR_MODE_16M } RConsColorMode;
 
@@ -487,6 +488,7 @@ typedef struct r_cons_t {
 	RConsSleepEndCallback cb_sleep_end;
 	RConsClickCallback cb_click;
 	RConsQueueTaskOneshot cb_task_oneshot;
+	RConsFunctionKey cb_fkey;
 
 	void *user; // Used by <RCore*>
 #if __UNIX__
@@ -528,7 +530,6 @@ typedef struct r_cons_t {
 	bool click_set;
 	int click_x;
 	int click_y;
-	bool onestream;
 	bool show_vals;		// show which section in Vv
 	// TODO: move into instance? + avoid unnecessary copies
 } RCons;
@@ -561,7 +562,6 @@ typedef struct r_cons_t {
 
 #define R_CONS_CLEAR_LINE "\x1b[2K\r"
 #define R_CONS_CLEAR_SCREEN "\x1b[2J\r"
-#define R_CONS_ADD_NEWLINES "\x1b[2J"
 #define R_CONS_CLEAR_FROM_CURSOR_TO_END "\x1b[0J\r"
 
 #define R_CONS_CURSOR_SAVE "\x1b[s"
@@ -808,14 +808,19 @@ R_API void r_cons_set_click(int x, int y);
 R_API bool r_cons_get_click(int *x, int *y);
 
 typedef void (*RConsBreak)(void *);
-R_API void r_cons_break_end(void);
 R_API bool r_cons_is_breaked(void);
 R_API bool r_cons_is_interactive(void);
 R_API bool r_cons_default_context_is_interactive(void);
-R_API void r_cons_break_timeout(int timeout);
-R_API void r_cons_breakword(const char *s);
 R_API void *r_cons_sleep_begin(void);
 R_API void r_cons_sleep_end(void *user);
+
+/* ^C */
+R_API void r_cons_break_push(RConsBreak cb, void *user);
+R_API void r_cons_break_pop(void);
+R_API void r_cons_break_clear(void);
+R_API void r_cons_breakword(const char *s);
+R_API void r_cons_break_end(void);
+R_API void r_cons_break_timeout(int timeout);
 
 /* pipe */
 R_API int r_cons_pipe_open(const char *file, int fdn, int append);
@@ -841,9 +846,6 @@ R_API bool r_cons_context_is_main(void);
 R_API void r_cons_context_break(RConsContext *context);
 R_API void r_cons_context_break_push(RConsContext *context, RConsBreak cb, void *user, bool sig);
 R_API void r_cons_context_break_pop(RConsContext *context, bool sig);
-R_API void r_cons_break_push(RConsBreak cb, void *user);
-R_API void r_cons_break_pop(void);
-R_API void r_cons_break_clear(void);
 
 /* control */
 R_API char *r_cons_editor(const char *file, const char *str);
@@ -1044,6 +1046,8 @@ struct r_line_t {
 	RLineHistoryUpCb cb_history_up;
 	RLineHistoryDownCb cb_history_down;
 	RLineEditorCb cb_editor;
+	// RLineFunctionKeyCb cb_fkey;
+	RConsFunctionKey cb_fkey;
 	/* state , TODO: use more bool */
 	int echo;
 	int has_echo;
@@ -1198,13 +1202,6 @@ typedef struct r_panels_root_t {
 
 #ifdef __cplusplus
 }
-#endif
-
-#if ONE_STREAM_HACK && !R_UTIL_SRC && !R_SEARCH_SRC && !R_FLAG_SRC && !R_BIN_SRC \
-	&& !R_JAVA_SRC && !R_ASM_SRC && !R_EGG_SRC
-R_API int r_cons_onestream_printf(const char *format, ...);
-#undef eprintf
-#define eprintf(...) r_cons_onestream_printf(__VA_ARGS__)
 #endif
 
 #endif

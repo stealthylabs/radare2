@@ -144,9 +144,22 @@ R_API PJ *pj_ki(PJ *j, const char *k, int i) {
 	return j;
 }
 
+R_API PJ *pj_ko(PJ *j, const char *k) {
+	r_return_val_if_fail (j && k, j);
+	pj_k (j, k);
+	pj_o (j);
+	return j;
+}
+
+R_API PJ *pj_ka(PJ *j, const char *k) {
+	r_return_val_if_fail (j && k, j);
+	pj_k (j, k);
+	pj_a (j);
+	return j;
+}
+
 R_API PJ *pj_ks(PJ *j, const char *k, const char *v) {
 	r_return_val_if_fail (j && k && v, j);
-	//if (*k && *v) 
 	pj_k (j, k);
 	pj_s (j, v);
 	return j;
@@ -181,9 +194,27 @@ R_API PJ *pj_s(PJ *j, const char *k) {
 		pj_raw (j, ek);
 		free (ek);
 	} else {
-		eprintf ("damn\n");
+		eprintf ("cannot escape string\n");
 	}
 	pj_raw (j, "\"");
+	return j;
+}
+
+R_API PJ *pj_r(PJ *j, const unsigned char *v, size_t v_len) {
+	r_return_val_if_fail (j && v, j);
+	size_t i;
+	pj_a (j);
+	for (i = 0; i < v_len; i++) {
+		pj_i (j, v[i]);
+	}
+	pj_end (j);
+	return j;
+}
+
+R_API PJ *pj_kr(PJ *j, const char *k, const unsigned char *v, size_t v_len) {
+	r_return_val_if_fail (j && k && v, j);
+	pj_k (j, k);
+	pj_r (j, v, v_len);
 	return j;
 }
 

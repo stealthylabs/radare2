@@ -18,10 +18,10 @@ if not capstone_dep.found() or not get_option('use_sys_capstone')
     # NOTE: when you update CS_TIP or CS_BRA, also update them in shlr/Makefile
     use_capstone5 = get_option('use_capstone5')
     if use_capstone5
-      CS_TIP = 'caacf11822683d8a317efee727c428db254670a9'
+      CS_TIP = '0de88ed3fdc0ab1f1e2a6eada3cdd93e18057a0f'
       CS_BRA = 'next'
     else
-      CS_TIP = 'a22aef2a18e6f6d8d30af4a1595af17337408e45'
+      CS_TIP = 'c80b6aaf973c822d82565f25e9b2e2c0102626fa'
       CS_BRA = 'v4'
     endif
 
@@ -247,7 +247,7 @@ if get_option('use_treesitter')
     endif
 
     # NOTE: when you update TS_TIP or TS_BRA, also update them in shlr/Makefile
-    TS_TIP = '9f77afcd1ff050855259f83fcf50056ad842a790'
+    TS_TIP = 'f049ba350f3f6019ce9a1cbb0975ebd154ef7ad3'
     TS_BRA = 'master'
 
     message('Cloning tree-sitter ' + TS_BRA + ' branch, commit ' + TS_TIP + ', into ' + tree_sitter_path)
@@ -295,7 +295,7 @@ if get_option('use_treesitter')
     endif
 
     # NOTE: when you update SHELLPARSER_TIP or SHELLPARSER_BRA, also update them in shlr/Makefile
-    SHELLPARSER_TIP = '110a050947e85b963ef6ea718478dbfe1b840193'
+    SHELLPARSER_TIP = '1a49d280f067b59b1e500f993bf98eb03927dea0'
     SHELLPARSER_BRA = 'master'
     shell_parser_user = 'ret2libc'
 
@@ -367,7 +367,6 @@ java_inc = [platform_inc, include_directories('java')]
 
 libr2java = static_library('r2java', java_files,
   include_directories: java_inc,
-  c_args: ['-DR_JAVA_SRC=1'],
   implicit_include_directories: false
 )
 

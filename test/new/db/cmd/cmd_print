@@ -10,9 +10,7 @@ EXPECT=<<EOF
 ==..==..########
 ##..##==--==##--
 EOF
-CMDS=<<EOF
-p2 16
-EOF
+CMDS=p2 16
 RUN
 
 NAME=p= 0xff 0x00
@@ -65,9 +63,7 @@ range (max-min):  127  0x7f
 size (of block):  10  0xa
 EOF
 ARGS=-n
-CMDS=<<EOF
-p=d 10 @ 0
-EOF
+CMDS=p=d 10 @ 0
 RUN
 
 NAME=p=e 5
@@ -79,9 +75,7 @@ EXPECT=<<EOF
 0x00053c43 003 00c3 |[100m#[0m[100m#[0m[100m#[0m[100m#[0m[100m#[0m[100m#[0m[100m#[0m[100m#[0m[100m#[0m[100m#[0m[100m#[0m[100m#[0m[100m#[0m[100m#[0m[100m#[0m[100m#[0m[100m#[0m[100m#[0m[100m#[0m[100m#[0m[100m#[0m[100m#[0m[100m#[0m[100m#[0m[100m#[0m[100m#[0m[100m#[0m[100m#[0m[100m#[0m[100m#[0m[100m#[0m[100m#[0m[100m#[0m[100m#[0m[100m#[0m[100m#[0m[100m#[0m[100m#[0m[100m#[0m
 0x0006fb04 004 0051 |[100m#[0m[100m#[0m[100m#[0m[100m#[0m[100m#[0m[100m#[0m[100m#[0m[100m#[0m[100m#[0m[100m#[0m[100m#[0m[100m#[0m[100m#[0m[100m#[0m[100m#[0m[100m#[0m
 EOF
-CMDS=<<EOF
-p=e 5@0
-EOF
+CMDS=p=e 5@0
 RUN
 
 NAME=p=e 5 0x100
@@ -126,9 +120,7 @@ EXPECT=<<EOF
 0x0006fb04 004 0076 |[100m#[0m[100m#[0m[100m#[0m[100m#[0m[100m#[0m[100m#[0m[100m#[0m[100m#[0m[100m#[0m[100m#[0m[100m#[0m[100m#[0m[100m#[0m[100m#[0m[100m#[0m[100m#[0m[100m#[0m[100m#[0m[100m#[0m[100m#[0m[100m#[0m[100m#[0m[100m#[0m[100m#[0m
 EOF
 ARGS=-n
-CMDS=<<EOF
-p=p 5@0
-EOF
+CMDS=p=p 5@0
 RUN
 
 NAME=p=p 5 0x100
@@ -168,9 +160,7 @@ FILE=malloc://1024
 EXPECT=<<EOF
 90909090909090909090
 EOF
-CMDS=<<EOF
-wx 90909090909090909090 ; p8 10
-EOF
+CMDS=wx 90909090909090909090 ; p8 10
 RUN
 
 NAME=p8 -10
@@ -178,9 +168,7 @@ FILE=malloc://1024
 EXPECT=<<EOF
 90909090909090909090
 EOF
-CMDS=<<EOF
-wx 90909090909090909090 ; s 10 ; p8 -10
-EOF
+CMDS=wx 90909090909090909090 ; s 10 ; p8 -10
 RUN
 
 NAME=pi 3
@@ -200,8 +188,9 @@ RUN
 
 NAME=pij 3
 FILE=malloc://512
-EXPECT='[{"offset":0,"val":1,"esil":"1,rax,=","refptr":false,"fcn_addr":0,"fcn_last":0,"size":5,"opcode":"mov eax, 1","disasm":"mov eax, 1","bytes":"b801000000","family":"cpu","type":"mov","reloc":false,"type_num":9,"type2_num":0},{"offset":5,"esil":"rcx,rdx,==,$z,zf,:=,64,$b,cf,:=,$p,pf,:=,63,$s,sf,:=,63,$o,of,:=","refptr":false,"fcn_addr":0,"fcn_last":0,"size":3,"opcode":"cmp rdx, rcx","disasm":"cmp rdx, rcx","bytes":"4839ca","family":"cpu","type":"cmp","reloc":false,"type_num":15,"type2_num":0},{"offset":8,"esil":"sf,of,!,^,zf,!,&,?{,10,rip,=,}","refptr":false,"fcn_addr":0,"fcn_last":0,"size":2,"opcode":"jg 0xa","disasm":"jg 0xa","bytes":"7f00","family":"cpu","type":"cjmp","reloc":false,"type_num":2147483649,"type2_num":0,"jump":10,"fail":10}]
-'
+EXPECT=<<EOF
+[{"offset":0,"val":1,"esil":"1,rax,=","refptr":false,"fcn_addr":0,"fcn_last":0,"size":5,"opcode":"mov eax, 1","disasm":"mov eax, 1","bytes":"b801000000","family":"cpu","type":"mov","reloc":false,"type_num":9,"type2_num":0},{"offset":5,"esil":"rcx,rdx,==,$z,zf,:=,64,$b,cf,:=,$p,pf,:=,63,$s,sf,:=,63,$o,of,:=","refptr":false,"fcn_addr":0,"fcn_last":0,"size":3,"opcode":"cmp rdx, rcx","disasm":"cmp rdx, rcx","bytes":"4839ca","family":"cpu","type":"cmp","reloc":false,"type_num":15,"type2_num":0},{"offset":8,"esil":"sf,of,!,^,zf,!,&,?{,10,rip,=,}","refptr":false,"fcn_addr":0,"fcn_last":0,"size":2,"opcode":"jg 0xa","disasm":"jg 0xa","bytes":"7f00","family":"cpu","type":"cjmp","reloc":false,"type_num":2147483649,"type2_num":0,"jump":10,"fail":10}]
+EOF
 CMDS=<<EOF
 e asm.arch=x86
 e asm.bits=64
@@ -263,8 +252,9 @@ RUN
 
 NAME=pij -5 @ 0x0040050f
 FILE=../bins/elf/analysis/main
-EXPECT='[{"offset":4195590,"esil":"rbp,8,rsp,-,=[8],8,rsp,-=","refptr":false,"fcn_addr":0,"fcn_last":0,"size":1,"opcode":"push rbp","disasm":"push rbp","bytes":"55","family":"cpu","type":"rpush","reloc":false,"type_num":268435468,"type2_num":0,"flags":["main","sym.main"]},{"offset":4195591,"esil":"rsp,rbp,=","refptr":false,"fcn_addr":0,"fcn_last":0,"size":3,"opcode":"mov rbp, rsp","disasm":"mov rbp, rsp","bytes":"4889e5","family":"cpu","type":"mov","reloc":false,"type_num":9,"type2_num":0},{"offset":4195594,"ptr":4195780,"val":4195780,"esil":"4195780,rdi,=","refptr":false,"fcn_addr":0,"fcn_last":0,"size":5,"opcode":"mov edi, 0x4005c4","disasm":"mov edi, str.Hello_World","bytes":"bfc4054000","family":"cpu","type":"mov","reloc":false,"type_num":9,"type2_num":0}]
-'
+EXPECT=<<EOF
+[{"offset":4195590,"esil":"rbp,8,rsp,-,=[8],8,rsp,-=","refptr":false,"fcn_addr":0,"fcn_last":0,"size":1,"opcode":"push rbp","disasm":"push rbp","bytes":"55","family":"cpu","type":"rpush","reloc":false,"type_num":268435468,"type2_num":0,"flags":["main","sym.main"]},{"offset":4195591,"esil":"rsp,rbp,=","refptr":false,"fcn_addr":0,"fcn_last":0,"size":3,"opcode":"mov rbp, rsp","disasm":"mov rbp, rsp","bytes":"4889e5","family":"cpu","type":"mov","reloc":false,"type_num":9,"type2_num":0},{"offset":4195594,"ptr":4195780,"val":4195780,"esil":"4195780,rdi,=","refptr":false,"fcn_addr":0,"fcn_last":0,"size":5,"opcode":"mov edi, 0x4005c4","disasm":"mov edi, str.Hello_World","bytes":"bfc4054000","family":"cpu","type":"mov","reloc":false,"type_num":9,"type2_num":0}]
+EOF
 CMDS=<<EOF
 e asm.arch=x86
 e asm.bits=64
@@ -369,8 +359,9 @@ RUN
 
 NAME=pij 3 (2)
 FILE=malloc://512
-EXPECT='[{"offset":0,"val":1,"esil":"1,rax,=","refptr":false,"fcn_addr":0,"fcn_last":0,"size":5,"opcode":"mov eax, 1","disasm":"mov eax, 1","bytes":"b801000000","family":"cpu","type":"mov","reloc":false,"type_num":9,"type2_num":0},{"offset":5,"esil":"rcx,rdx,==,$z,zf,:=,64,$b,cf,:=,$p,pf,:=,63,$s,sf,:=,63,$o,of,:=","refptr":false,"fcn_addr":0,"fcn_last":0,"size":3,"opcode":"cmp rdx, rcx","disasm":"cmp rdx, rcx","bytes":"4839ca","family":"cpu","type":"cmp","reloc":false,"type_num":15,"type2_num":0},{"offset":8,"esil":"sf,of,!,^,zf,!,&,?{,10,rip,=,}","refptr":false,"fcn_addr":0,"fcn_last":0,"size":2,"opcode":"jg 0xa","disasm":"jg 0xa","bytes":"7f00","family":"cpu","type":"cjmp","reloc":false,"type_num":2147483649,"type2_num":0,"jump":10,"fail":10}]
-'
+EXPECT=<<EOF
+[{"offset":0,"val":1,"esil":"1,rax,=","refptr":false,"fcn_addr":0,"fcn_last":0,"size":5,"opcode":"mov eax, 1","disasm":"mov eax, 1","bytes":"b801000000","family":"cpu","type":"mov","reloc":false,"type_num":9,"type2_num":0},{"offset":5,"esil":"rcx,rdx,==,$z,zf,:=,64,$b,cf,:=,$p,pf,:=,63,$s,sf,:=,63,$o,of,:=","refptr":false,"fcn_addr":0,"fcn_last":0,"size":3,"opcode":"cmp rdx, rcx","disasm":"cmp rdx, rcx","bytes":"4839ca","family":"cpu","type":"cmp","reloc":false,"type_num":15,"type2_num":0},{"offset":8,"esil":"sf,of,!,^,zf,!,&,?{,10,rip,=,}","refptr":false,"fcn_addr":0,"fcn_last":0,"size":2,"opcode":"jg 0xa","disasm":"jg 0xa","bytes":"7f00","family":"cpu","type":"cjmp","reloc":false,"type_num":2147483649,"type2_num":0,"jump":10,"fail":10}]
+EOF
 CMDS=<<EOF
 e asm.arch=x86
 e asm.bits=64
@@ -414,7 +405,8 @@ RUN
 
 NAME=pij -3 @ 3
 FILE=malloc://512
-EXPECT='[
+EXPECT=<<EOF
+[
   {
     "offset": 3,
     "esil": "al,rax,+=[1],7,$o,of,:=,7,$s,sf,:=,$z,zf,:=,7,$c,cf,:=,$p,pf,:=",
@@ -466,7 +458,7 @@ EXPECT='[
     "fail": 10
   }
 ]
-'
+EOF
 CMDS=<<EOF
 e asm.arch=x86
 e asm.bits=64
@@ -564,9 +556,7 @@ FILE=../bins/src/hello.c
 EXPECT=<<EOF
 0x00000000 1 C source code
 EOF
-CMDS=<<EOF
-pm
-EOF
+CMDS=pm
 RUN
 
 NAME=pm elf/main
@@ -575,9 +565,7 @@ EXPECT=<<EOF
 0x00000000 1 ELF 64-bit LSB executable, x86-64, version 1
 EOF
 ARGS=-n
-CMDS=<<EOF
-pm
-EOF
+CMDS=pm
 RUN
 
 NAME=pm mach0/fatmach0-3true
@@ -586,9 +574,7 @@ EXPECT=<<EOF
 0x00000000 1 Fat-Mach-O
 EOF
 ARGS=-n
-CMDS=<<EOF
-pm
-EOF
+CMDS=pm
 RUN
 
 NAME=pm java/Hello.class
@@ -597,9 +583,7 @@ EXPECT=<<EOF
 0x00000000 1 Java CLASS
 EOF
 ARGS=-n
-CMDS=<<EOF
-pm
-EOF
+CMDS=pm
 RUN
 
 NAME=pm pe/a.exe
@@ -608,9 +592,7 @@ EXPECT=<<EOF
 0x00000000 1 PE  for MS Windows (console) Intel 80386 32-bit
 EOF
 ARGS=-n
-CMDS=<<EOF
-pm
-EOF
+CMDS=pm
 RUN
 
 NAME=print raw lines
@@ -689,9 +671,7 @@ NAME=p- with "r2 --"
 FILE=--
 EXPECT=<<EOF
 EOF
-CMDS=<<EOF
-p-
-EOF
+CMDS=p-
 RUN
 
 NAME=p- with malloc://512
@@ -699,9 +679,7 @@ FILE=malloc://512
 EXPECT=<<EOF
 0x00000000 [^_____________________________________________] 0x00000200
 EOF
-CMDS=<<EOF
-p-
-EOF
+CMDS=p-
 RUN
 
 NAME=psW 32 widestring
@@ -709,9 +687,7 @@ FILE=../bins/elf/crackme0x00b
 EXPECT=<<EOF
 w0wgreat
 EOF
-CMDS=<<EOF
-psW @ obj.pass.1964
-EOF
+CMDS=psW @ obj.pass.1964
 RUN
 
 NAME=psW 32 widestring leading zeros
@@ -719,9 +695,7 @@ FILE=../bins/elf/crackme0x00b
 EXPECT=<<EOF
 w0wgreat
 EOF
-CMDS=<<EOF
-psW @ 0x0804a03e
-EOF
+CMDS=psW @ 0x0804a03e
 RUN
 
 NAME=ps leading zeros
@@ -730,16 +704,14 @@ FILE=../bins/elf/crackme0x00b
 EXPECT=<<EOF
 w
 EOF
-CMDS=<<EOF
-ps @ 0x0804a03e
-EOF
+CMDS=ps @ 0x0804a03e
 RUN
 
 NAME=io.unalloc, io.unalloc.ch and prc
 FILE=../bins/elf/analysis/tiny.elf
 CMDS=<<EOF
 . ../bins/other/palette.r2
-(print, prc 0x00010032-0x0000fffa @ 0x0000fffa)
+(print; prc 0x00010032-0x0000fffa @ 0x0000fffa)
 e io.unalloc=true
 e scr.color=0
 .(print)

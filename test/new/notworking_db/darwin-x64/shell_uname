@@ -1,6 +1,5 @@
-NAME='uname'
+NAME=uname
 FILE=-
-ARGS=
 BROKEN=
 CMDS=<<EOF
 !uname
