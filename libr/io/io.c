@@ -98,7 +98,7 @@ static st64 on_map_skyline(RIO *io, ut64 vaddr, ut8 *buf, int len, int match_flg
 	return prefix_mode ? addr - vaddr : ret;
 }
 
-R_API RIO* r_io_new() {
+R_API RIO* r_io_new(void) {
 	return r_io_init (R_NEW0 (RIO));
 }
 
@@ -107,7 +107,6 @@ R_API RIO* r_io_init(RIO* io) {
 	io->addrbytes = 1;
 	r_io_desc_init (io);
 	r_pvector_init (&io->map_skyline, free);
-	r_pvector_init (&io->map_skyline_shadow, free);
 	r_io_map_init (io);
 	r_io_cache_init (io);
 	r_io_plugin_init (io);
@@ -147,7 +146,7 @@ R_API RIODesc *r_io_open_nomap(RIO *io, const char *uri, int perm, int mode) {
 
 /* opens a file and maps it to 0x0 */
 R_API RIODesc* r_io_open(RIO* io, const char* uri, int perm, int mode) {
-	r_return_val_if_fail (io && io->maps, NULL);
+	r_return_val_if_fail (io, NULL);
 	RIODesc* desc = r_io_open_nomap (io, uri, perm, mode);
 	if (desc) {
 		r_io_map_new (io, desc->fd, desc->perm, 0LL, 0LL, r_io_desc_size (desc));
@@ -157,7 +156,7 @@ R_API RIODesc* r_io_open(RIO* io, const char* uri, int perm, int mode) {
 
 /* opens a file and maps it to an offset specified by the "at"-parameter */
 R_API RIODesc* r_io_open_at(RIO* io, const char* uri, int perm, int mode, ut64 at) {
-	r_return_val_if_fail (io && io->maps && uri, NULL);
+	r_return_val_if_fail (io && uri, NULL);
 
 	RIODesc* desc = r_io_open_nomap (io, uri, perm, mode);
 	if (!desc) {
@@ -167,7 +166,7 @@ R_API RIODesc* r_io_open_at(RIO* io, const char* uri, int perm, int mode, ut64 a
 	// second map
 	if (size && ((UT64_MAX - size + 1) < at)) {
 		// split map into 2 maps if only 1 big map results into interger overflow
-		io_map_new (io, desc->fd, desc->perm, UT64_MAX - at + 1, 0LL, size - (UT64_MAX - at) - 1, false);
+		io_map_new (io, desc->fd, desc->perm, UT64_MAX - at + 1, 0LL, size - (UT64_MAX - at) - 1);
 		// someone pls take a look at this confusing stuff
 		size = UT64_MAX - at + 1;
 	}
@@ -539,7 +538,7 @@ R_API void r_io_bind(RIO *io, RIOBind *bnd) {
 }
 
 /* moves bytes up (+) or down (-) within the specified range */
-R_API int r_io_shift(RIO* io, ut64 start, ut64 end, st64 move) {
+R_API bool r_io_shift(RIO* io, ut64 start, ut64 end, st64 move) {
 	ut8* buf;
 	ut64 chunksize = 0x10000;
 	ut64 saved_off = io->off;

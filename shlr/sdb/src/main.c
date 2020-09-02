@@ -1,4 +1,4 @@
-/* sdb - MIT - Copyright 2011-2019 - pancake */
+/* sdb - MIT - Copyright 2011-2020 - pancake */
 
 #include <signal.h>
 #include <stdio.h>
@@ -25,6 +25,10 @@ static void terminate(int sig UNUSED) {
 	}
 	sdb_free (s);
 	exit (sig<2?sig:0);
+}
+
+static void write_null(void) {
+	(void)write (1, "", 1);
 }
 
 #define BS 128
@@ -197,7 +201,6 @@ static int sdb_grep_dump(const char *dbname, int fmt, bool grep,
 			break;
 		case MODE_ZERO:
 			printf ("%s=%s", k, v);
-			fwrite ("", 1, 1, stdout);
 			break;
 		default:
 			printf ("%s=%s\n", k, v);
@@ -208,7 +211,7 @@ static int sdb_grep_dump(const char *dbname, int fmt, bool grep,
 	switch (fmt) {
 	case MODE_ZERO:
 		fflush (stdout);
-		write (1, "", 1);
+		write_null ();
 		break;
 	case MODE_JSON:
 		printf ("}\n");
@@ -296,7 +299,7 @@ static int showversion(void) {
 	return 0;
 }
 
-static int jsonIndent() {
+static int jsonIndent(void) {
 	int len;
 	char *out;
 	char *in = stdin_slurp (&len);
@@ -314,7 +317,7 @@ static int jsonIndent() {
 	return 0;
 }
 
-static int base64encode() {
+static int base64encode(void) {
 	char *out;
 	int len = 0;
 	ut8 *in = (ut8 *) stdin_slurp (&len);
@@ -332,7 +335,7 @@ static int base64encode() {
 	return 0;
 }
 
-static int base64decode() {
+static int base64decode(void) {
 	ut8 *out;
 	int len, ret = 1;
 	char *in = (char *) stdin_slurp (&len);
@@ -340,7 +343,7 @@ static int base64decode() {
 		out = sdb_decode (in, &len);
 		if (out) {
 			if (len >= 0) {
-				write (1, out, len);
+				(void)write (1, out, len);
 				ret = 0;
 			}
 			free (out);
@@ -491,7 +494,7 @@ int main(int argc, const char **argv) {
 				save |= sdb_query (s, line);
 				if (fmt) {
 					fflush (stdout);
-					write (1, "", 1);
+					write_null ();
 				}
 				free (line);
 			}
@@ -508,7 +511,7 @@ int main(int argc, const char **argv) {
 			save |= sdb_query (s, argv[i]);
 			if (fmt) {
 				fflush (stdout);
-				write (1, "", 1);
+				write_null ();
 			}
 		}
 	}

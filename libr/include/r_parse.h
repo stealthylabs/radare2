@@ -13,18 +13,18 @@ extern "C" {
 
 R_LIB_VERSION_HEADER(r_parse);
 
-typedef RList* (*RAnalVarList)(RAnal *anal, RAnalFunction *fcn, int kind);
+typedef RList* (*RAnalVarList)(RAnalFunction *fcn, int kind);
 
 typedef struct r_parse_t {
 	void *user;
 	RSpace *flagspace;
 	RSpace *notin_flagspace;
 	bool pseudo;
-	bool regsub; // replace registers with their respective alias/role name (rdi=A0, ...)
-	bool relsub; // replace rip relative expressions in instruction
-	bool tailsub; // replace any immediate relative to current address with .. prefix syntax
+	bool subreg; // replace registers with their respective alias/role name (rdi=A0, ...)
+	bool subrel; // replace rip relative expressions in instruction
+	bool subtail; // replace any immediate relative to current address with .. prefix syntax
 	bool localvar_only; // if true use only the local variable name (e.g. [local_10h] instead of [ebp + local10h])
-	ut64 relsub_addr;
+	ut64 subrel_addr;
 	int maxflagnamelen;
 	int minval;
 	char *retleave_asm;
@@ -32,7 +32,8 @@ typedef struct r_parse_t {
 	// RAnal *anal; // weak anal ref XXX do not use. use analb.anal
 	RList *parsers;
 	RAnalVarList varlist;
-	int (*get_ptr_at)(void *user, RAnalVar *var, ut64 addr);
+	st64 (*get_ptr_at)(RAnalFunction *fcn, st64 delta, ut64 addr);
+	const char *(*get_reg_at)(RAnalFunction *fcn, st64 delta, ut64 addr);
 	char* (*get_op_ireg)(void *user, ut64 addr);
 	RAnalBind analb;
 	RFlagGetAtAddr flag_get; // XXX

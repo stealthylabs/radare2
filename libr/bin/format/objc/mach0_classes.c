@@ -1,10 +1,18 @@
-/* radare - LGPL - Copyright 2015-2018 - inisider */
+/* radare - LGPL - Copyright 2015-2020 - inisider, pancake */
 
 #include "../../i/private.h"
 #include "mach0_classes.h"
 
 #define RO_META (1 << 0)
 #define MAX_CLASS_NAME_LEN 256
+
+#ifdef R_BIN_MACH064
+#define FAST_DATA_MASK 0x00007ffffffffff8UL
+#else
+#define FAST_DATA_MASK 0xfffffffcUL
+#endif
+
+#define RO_DATA_PTR(x) ((x) & FAST_DATA_MASK)
 
 struct MACH0_(SMethodList) {
 	ut32 entsize;
@@ -171,17 +179,21 @@ static void copy_sym_name_with_namespace(char *class_name, char *read_name, RBin
 	sym->name = strdup (read_name);
 }
 
+static int sort_by_offset(const void *_a , const void *_b) {
+	RBinField *a = (RBinField*)_a;
+	RBinField *b = (RBinField*)_b;
+	return a->offset - b->offset;
+}
+
 static void get_ivar_list_t(mach0_ut p, RBinFile *bf, RBinClass *klass) {
-	struct MACH0_(SIVarList) il;
+	struct MACH0_(SIVarList) il = {0};
 	struct MACH0_(SIVar) i;
 	mach0_ut r;
 	ut32 offset, left, j;
-	char *name = NULL;
-	char *type = NULL;
 
 	int len;
 	bool bigendian;
-	mach0_ut ivar_offset_p, ivar_offset;
+	mach0_ut ivar_offset;
 	RBinField *field = NULL;
 	ut8 sivarlist[sizeof (struct MACH0_(SIVarList))] = {0};
 	ut8 sivar[sizeof (struct MACH0_(SIVar))] = {0};
@@ -195,7 +207,6 @@ static void get_ivar_list_t(mach0_ut p, RBinFile *bf, RBinClass *klass) {
 	if (!(r = va2pa (p, &offset, &left, bf))) {
 		return;
 	}
-	memset (&il, '\0', sizeof (struct MACH0_(SIVarList)));
 	if (r + left < r || r + sizeof (struct MACH0_(SIVarList)) < r) {
 		return;
 	}
@@ -219,16 +230,14 @@ static void get_ivar_list_t(mach0_ut p, RBinFile *bf, RBinClass *klass) {
 	il.count = r_read_ble (&sivarlist[4], bigendian, 32);
 	p += sizeof (struct MACH0_(SIVarList));
 	offset += sizeof (struct MACH0_(SIVarList));
+
+	ut64 base_offset = UT64_MAX;
 	for (j = 0; j < il.count; j++) {
 		r = va2pa (p, &offset, &left, bf);
 		if (!r) {
 			return;
 		}
-		if (!(field = R_NEW0 (RBinField))) {
-			// retain just for debug
-			// eprintf ("RBinField allocation error\n");
-			return;
-		}
+		field = R_NEW0 (RBinField);
 		memset (&i, '\0', sizeof (struct MACH0_(SIVar)));
 		if (r + left < r || r + sizeof (struct MACH0_(SIVar)) < r) {
 			goto error;
@@ -249,44 +258,43 @@ static void get_ivar_list_t(mach0_ut p, RBinFile *bf, RBinClass *klass) {
 				goto error;
 			}
 		}
-		switch (sizeof (mach0_ut)) {
-		case 4:
-			i.offset = r_read_ble (&sivar[0], bigendian, 32);
-			i.name = r_read_ble (&sivar[4], bigendian, 32);
-			i.type = r_read_ble (&sivar[8], bigendian, 32);
-			i.alignment = r_read_ble (&sivar[12], bigendian, 32);
-			i.size = r_read_ble (&sivar[16], bigendian, 32);
-			break;
-		case 8:
-			i.offset = r_read_ble (&sivar[0], bigendian, 64);
-			i.name = r_read_ble (&sivar[8], bigendian, 64);
-			i.type = r_read_ble (&sivar[16], bigendian, 64);
-			i.alignment = r_read_ble (&sivar[24], bigendian, 32);
-			i.size = r_read_ble (&sivar[28], bigendian, 32);
-			break;
+#if R_BIN_MACH064
+		i.offset = r_read_ble (&sivar[0], bigendian, 64);
+		i.name = r_read_ble (&sivar[8], bigendian, 64);
+		i.type = r_read_ble (&sivar[16], bigendian, 64);
+		i.alignment = r_read_ble (&sivar[24], bigendian, 32);
+		i.size = r_read_ble (&sivar[28], bigendian, 32);
+#else
+		i.offset = r_read_ble (&sivar[0], bigendian, 32);
+		i.name = r_read_ble (&sivar[4], bigendian, 32);
+		i.type = r_read_ble (&sivar[8], bigendian, 32);
+		i.alignment = r_read_ble (&sivar[12], bigendian, 32);
+		i.size = r_read_ble (&sivar[16], bigendian, 32);
+#endif
+		field->vaddr = va2pa (i.offset, NULL, &left, bf);
+		// field->offset = base_offset - i.offset;
+		field->offset = i.offset - base_offset;
+		if (base_offset == UT64_MAX) {
+			base_offset = i.offset; //  - sizeof (mach0_ut);
 		}
 
-
-		ivar_offset_p = va2pa (i.offset, NULL, &left, bf);
-
-		if (ivar_offset_p > bf->size) {
+		if (field->vaddr > bf->size) {
 			goto error;
 		}
-		if (ivar_offset_p + sizeof (ivar_offset) > bf->size) {
+		if (field->vaddr + sizeof (ivar_offset) > bf->size) {
 			goto error;
 		}
-		if (ivar_offset_p != 0 && left >= sizeof (mach0_ut)) {
-			len = r_buf_read_at (bf->buf, ivar_offset_p, offs, sizeof (mach0_ut));
+		if (field->vaddr != 0 && left >= sizeof (mach0_ut)) {
+			len = r_buf_read_at (bf->buf, field->vaddr, offs, sizeof (mach0_ut));
 			if (len != sizeof (mach0_ut)) {
 				eprintf ("Error reading\n");
 				goto error;
 			}
 			ivar_offset = r_read_ble (offs, bigendian, 8 * sizeof (mach0_ut));
-			field->vaddr = ivar_offset;
+			// field->vaddr = ivar_offset;
 		}
-
 		r = va2pa (i.name, NULL, &left, bf);
-		if (r != 0) {
+		if (r) {
 			struct MACH0_(obj_t) *bin = (struct MACH0_(obj_t) *)bf->o->bin_obj;
 			if (r + left < r) {
 				goto error;
@@ -294,6 +302,7 @@ static void get_ivar_list_t(mach0_ut p, RBinFile *bf, RBinClass *klass) {
 			if (r > bf->size || r + left > bf->size) {
 				goto error;
 			}
+			char *name;
 			if (bin->has_crypto) {
 				name = strdup ("some_encrypted_data");
 				left = strlen (name) + 1;
@@ -308,12 +317,13 @@ static void get_ivar_list_t(mach0_ut p, RBinFile *bf, RBinClass *klass) {
 				}
 				name[name_len] = 0;
 			}
+			// XXX the field name shouldnt contain the class name
 			field->name = r_str_newf ("%s::%s%s", klass->name, "(ivar)", name);
 			R_FREE (name);
 		}
 
 		r = va2pa (i.type, NULL, &left, bf);
-		if (r != 0) {
+		if (r) {
 			struct MACH0_(obj_t) *bin = (struct MACH0_(obj_t) *) bf->o->bin_obj;
 			int is_crypted = bin->has_crypto;
 			if (r + left < r) {
@@ -322,25 +332,56 @@ static void get_ivar_list_t(mach0_ut p, RBinFile *bf, RBinClass *klass) {
 			if (r > bf->size || r + left > bf->size) {
 				goto error;
 			}
+			char *type = NULL;
 			if (is_crypted == 1) {
 				type = strdup ("some_encrypted_data");
 			// 	left = strlen (name) + 1;
 			} else {
 				int type_len = R_MIN (MAX_CLASS_NAME_LEN, left);
 				type = calloc (1, type_len + 1);
-				r_buf_read_at (bf->buf, r, (ut8 *)type, type_len);
-				type[type_len] = 0;
+				if (type) {
+					r_buf_read_at (bf->buf, r, (ut8 *)type, type_len);
+					type[type_len] = 0;
+				}
 			}
-      			field->type = strdup (type);
-			R_FREE (type);
+			if (type) {
+				field->type = type;
+				type = NULL;
+			} else {
+				field->type = NULL;
+			}
+			r_list_append (klass->fields, field);
+		} else {
+			goto error;
 		}
-
-		r_list_append (klass->fields, field);
 		p += sizeof (struct MACH0_(SIVar));
 		offset += sizeof (struct MACH0_(SIVar));
 	}
+	RListIter *iter;
+	r_list_sort (klass->fields, sort_by_offset);
+	size_t first_offset = 0;
+	size_t prev_offset = 0;
+	r_list_foreach (klass->fields, iter, field) {
+		if (!first_offset) {
+			first_offset = field->offset;
+		}
+		if (field->offset > prev_offset + 8) {
+			// adjust offset
+			field->offset = prev_offset + sizeof (mach0_ut);
+		}
+		prev_offset = field->offset;
+	}
+	if (first_offset > 0) {
+		RBinField *field = R_NEW0 (RBinField);
+		field->name = strdup ("_padding");
+		field->size = first_offset;
+		field->type = strdup ((field->size == 8)?  "uint64_t": "uint32_t");
+		field->vaddr = base_offset;
+		field->offset = 0;
+		r_list_prepend (klass->fields, field);
+	}
+	r_list_sort (klass->fields, sort_by_offset);
 	return;
-
 error:
 	r_bin_field_free (field);
 }
@@ -1061,7 +1102,7 @@ static void get_class_ro_t(mach0_ut p, RBinFile *bf, ut32 *is_meta_class, RBinCl
 	}
 }
 
-static mach0_ut get_isa_value() {
+static mach0_ut get_isa_value(void) {
 	// TODO: according to otool sources this is taken from relocs
 	return 0;
 }
@@ -1130,7 +1171,7 @@ void MACH0_(get_class_t)(mach0_ut p, RBinFile *bf, RBinClass *klass, bool dupe, 
 			}
 		}
 	}
-	get_class_ro_t (c.data & ~0x3, bf, &is_meta_class, klass);
+	get_class_ro_t (RO_DATA_PTR (c.data), bf, &is_meta_class, klass);
 
 #if SWIFT_SUPPORT
 	if (q (c.data + n_value) & 7) {
@@ -1453,8 +1494,7 @@ void MACH0_(get_category_t)(mach0_ut p, RBinFile *bf, RBinClass *klass, RSkipLis
 			R_FREE (category_name);
 			return;
 		}
-
-		mach0_ut name_field = ro_data + 3 * 4 + ptr_size;
+		mach0_ut name_field = RO_DATA_PTR (ro_data) + 3 * 4 + ptr_size;
 #ifdef R_BIN_MACH064
 		name_field += 4;
 #endif

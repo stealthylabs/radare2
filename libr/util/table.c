@@ -74,7 +74,7 @@ R_API RTableColumn *r_table_column_clone(RTableColumn *col) {
 	return c;
 }
 
-R_API RTable *r_table_new() {
+R_API RTable *r_table_new(void) {
 	RTable *t = R_NEW0 (RTable);
 	if (t) {
 		t->showHeader = true;
@@ -278,6 +278,9 @@ static void __computeTotal(RTable *t) {
 }
 
 R_API char *r_table_tofancystring(RTable *t) {
+	if (r_list_length (t->cols) == 0) {
+		return strdup ("");
+	}
 	RStrBuf *sb = r_strbuf_new ("");
 	RTableRow *row;
 	RTableColumn *col;
@@ -285,10 +288,10 @@ R_API char *r_table_tofancystring(RTable *t) {
 	RListIter *iter, *iter2;
 	bool useUtf8 = (cons && cons->use_utf8);
 	bool useUtf8Curvy = (cons && cons->use_utf8_curvy);
-	const char *v_line = useUtf8 ||  useUtf8Curvy ? RUNE_LINE_VERT : "|";
+	const char *v_line = useUtf8 || useUtf8Curvy ? RUNE_LINE_VERT : "|";
 	const char *h_line = useUtf8 || useUtf8Curvy ? RUNE_LINE_HORIZ : "-";
-	const char *l_intersect = useUtf8 ||  useUtf8Curvy ? RUNE_LINE_VERT : ")";
-	const char *r_intersect = useUtf8 ||  useUtf8Curvy ? RUNE_LINE_VERT : "(";
+	const char *l_intersect = useUtf8 || useUtf8Curvy ? RUNE_LINE_VERT : ")";
+	const char *r_intersect = useUtf8 || useUtf8Curvy ? RUNE_LINE_VERT : "(";
 	const char *tl_corner = useUtf8 ? (useUtf8Curvy ? RUNE_CURVE_CORNER_TL : RUNE_CORNER_TL) : ".";
 	const char *tr_corner = useUtf8 ? (useUtf8Curvy ? RUNE_CURVE_CORNER_TR : RUNE_CORNER_TR) : ".";
 	const char *bl_corner = useUtf8 ? (useUtf8Curvy ? RUNE_CURVE_CORNER_BL : RUNE_CORNER_BL) : "`";
@@ -598,14 +601,85 @@ R_API void r_table_sortlen(RTable *t, int nth, bool dec) {
 	RTableColumn *col = r_list_get_n (t->cols, nth);
 	if (col) {
 		Gnth = nth;
-		Gcmp = cmplen;
 		t->rows->sorted = false; //force sorting
-		r_list_sort (t->rows, Gcmp);
+		r_list_sort (t->rows, cmplen);
 		if (dec) {
 			r_list_reverse (t->rows);
 		}
 		Gnth = 0;
-		Gcmp = NULL;
+	}
+}
+
+static int r_rows_cmp(RList *lhs, RList *rhs, RList *cols, int nth) {
+	RListIter *iter_lhs;
+	RListIter *iter_rhs;
+	RListIter *iter_col;
+	RTableColumn *item_col;
+
+	void *item_lhs;
+	void *item_rhs;
+	int tmp;
+	int i = 0;
+
+	for (iter_lhs = lhs->head, iter_rhs = rhs->head, iter_col = cols->head;
+		iter_lhs && iter_rhs && iter_col;
+		iter_lhs = iter_lhs->n, iter_rhs = iter_rhs->n, iter_col = iter_col->n) {
+
+		item_lhs = iter_lhs->data;
+		item_rhs = iter_rhs->data;
+		item_col = iter_col->data;
+
+		if (nth == -1 || i == nth) {
+			tmp = item_col->type->cmp (item_lhs, item_rhs);
+
+			if (tmp) {
+				return tmp;
+			}
+		}
+
+		++i;
+	}
+
+	if (iter_lhs) {
+		return 1;
+	}
+
+	if (iter_rhs) {
+		return -1;
+	}
+
+	return 0;
+}
+
+R_API void r_table_uniq(RTable *t) {
+	r_table_group (t, -1, NULL);
+}
+
+R_API void r_table_group(RTable *t, int nth, RTableSelector fcn) {
+	RListIter *iter;
+	RListIter *tmp;
+	RTableRow *row;
+
+	RListIter *iter_inner;
+	RTableRow *uniq_row;
+
+	RList *rows = t->rows;
+
+	r_list_foreach_safe (rows, iter, tmp, row) {
+		for (iter_inner = rows->head;
+			iter_inner && iter_inner != iter;
+			iter_inner = iter_inner->n) {
+
+			uniq_row = iter_inner->data;
+
+			if (!r_rows_cmp (uniq_row->items, row->items, t->cols, nth)) {
+				if (fcn) {
+					fcn (uniq_row, row, nth);
+				}
+				r_list_delete (rows, iter);
+				break;
+			}
+		}
 	}
 }
 
@@ -785,6 +859,8 @@ R_API bool r_table_query(RTable *t, const char *q) {
 		eprintf (" col0/gt/0x800        grep rows matching col0 > 0x800\n");
 		eprintf (" col0/lt/0x800        grep rows matching col0 < 0x800\n");
 		eprintf (" col0/eq/0x800        grep rows matching col0 == 0x800\n");
+		eprintf (" col0/uniq            get the first row of each that col0 is unique\n");
+		eprintf (" /uniq                same as | uniq (match all columns)\n");
 		eprintf (" name/str/warn        grep rows matching col(name).str(warn)\n");
 		eprintf (" name/strlen/3        grep rows matching strlen(col) == X\n");
 		eprintf (" name/minlen/3        grep rows matching strlen(col) > X\n");
@@ -809,10 +885,12 @@ R_API bool r_table_query(RTable *t, const char *q) {
 		}
 		int col = r_table_column_nth (t, columnName);
 		if (col == -1) {
-			if (*columnName == '[') {
-				col = atoi (columnName + 1);
-			} else {
+			if (columnName == NULL && strcmp (operation, "uniq")) {
 				eprintf ("Invalid column name (%s) for (%s)\n", columnName, query);
+			} else if (columnName) {
+				if (*columnName == '[') {
+					col = atoi (columnName + 1);
+				}
 			}
 		}
 		if (!operation) {
@@ -820,6 +898,8 @@ R_API bool r_table_query(RTable *t, const char *q) {
 		}
 		if (!strcmp (operation, "sort")) {
 			r_table_sort (t, col, operand && !strcmp (operand, "dec"));
+		} else if (!strcmp (operation, "uniq")) {
+			r_table_group (t, col, NULL);
 		} else if (!strcmp (operation, "sortlen")) {
 			r_table_sortlen (t, col, operand && !strcmp (operand, "dec"));
 		} else if (!strcmp (operation, "join")) {

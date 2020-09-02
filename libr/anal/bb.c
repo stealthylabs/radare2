@@ -13,7 +13,7 @@ typedef struct {
 static bool bb_from_offset_jmpmid_cb(RAnalBlock *block, void *user) {
 	BBFromOffsetJmpmidCtx *ctx = user;
 	// If an instruction starts exactly at the search addr, return that block immediately
-	if (r_anal_bb_op_starts_at (block, ctx->addr)) {
+	if (r_anal_block_op_starts_at (block, ctx->addr)) {
 		ctx->ret = block;
 		return false;
 	}
@@ -102,24 +102,6 @@ R_API ut64 r_anal_bb_opaddr_at(RAnalBlock *bb, ut64 off) {
 	return bb->addr + last_delta;
 }
 
-/* return true if an instruction starts at a given address of the given
- * basic block. */
-R_API bool r_anal_bb_op_starts_at(RAnalBlock *bb, ut64 addr) {
-	int i;
-
-	if (!r_anal_block_contains (bb, addr)) {
-		return false;
-	}
-	ut16 off = addr - bb->addr;
-	for (i = 0; i < bb->ninstr; i++) {
-		ut16 inst_off = r_anal_bb_offset_inst (bb, i);
-		if (off == inst_off) {
-			return true;
-		}
-	}
-	return false;
-}
-
 // returns the size of the i-th instruction in a basic block
 R_API ut64 r_anal_bb_size_i(RAnalBlock *bb, int i) {
 	if (i < 0 || i >= bb->ninstr) {
@@ -133,6 +115,6 @@ R_API ut64 r_anal_bb_size_i(RAnalBlock *bb, int i) {
 /* returns the address of the basic block that contains addr or UT64_MAX if
  * there is no such basic block */
 R_API ut64 r_anal_get_bbaddr(RAnal *anal, ut64 addr) {
-	RAnalBlock *bb = r_anal_get_block_at (anal, addr);
+	RAnalBlock *bb = r_anal_bb_from_offset (anal, addr);
 	return bb? bb->addr: UT64_MAX;
 }

@@ -1,10 +1,10 @@
 r_reg_sources = [
   'arena.c',
-  'cond.c',
+  'rcond.c',
   'double.c',
   'profile.c',
   'reg.c',
-  'value.c',
+  'rvalue.c',
 ]
 
 r_reg = library('r_reg', r_reg_sources,
@@ -24,6 +24,7 @@ pkgconfig_mod.generate(r_reg,
   version: r2_version,
   name: 'r_reg',
   filebase: 'r_reg',
+  libraries: pkgcfg_sanitize_libs,
   requires: [
     'r_util'
   ],

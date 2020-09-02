@@ -73,7 +73,7 @@ typedef struct sdb_diff_kv_cb_ctx {
 	bool add;
 } SdbDiffKVCbCtx;
 
-static int sdb_diff_report_kv_cb(void *user, const char *k, const char *v) {
+static bool sdb_diff_report_kv_cb(void *user, const char *k, const char *v) {
 	const SdbDiffKVCbCtx *ctx = user;
 	sdb_diff_report_kv (ctx->ctx, k, v, ctx->add);
 	return true;
@@ -95,10 +95,10 @@ static void sdb_diff_report(SdbDiffCtx *ctx, Sdb *sdb, bool add) {
 	sdb_foreach (sdb, sdb_diff_report_kv_cb, &cb_ctx);
 }
 
-static int sdb_diff_kv_cb(void *user, const char *k, const char *v) {
+static bool sdb_diff_kv_cb(void *user, const char *k, const char *v) {
 	const SdbDiffKVCbCtx *ctx = user;
 	Sdb *other = ctx->add ? ctx->ctx->a : ctx->ctx->b;
-	const char *other_val = sdb_get (other, k, NULL);
+	const char *other_val = sdb_const_get (other, k, NULL);
 	if (!other_val || !*other_val) {
 		DIFF (ctx->ctx,
 			sdb_diff_report_kv (ctx->ctx, k, v, ctx->add);

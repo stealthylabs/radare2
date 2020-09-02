@@ -1,4 +1,4 @@
-/* radare2 - LGPL - Copyright 2017-2019 - condret, pancake, alvaro */
+/* radare2 - LGPL - Copyright 2017-2020 - condret, pancake, alvaro */
 
 #ifndef R2_IO_H
 #define R2_IO_H
@@ -81,18 +81,15 @@ typedef struct r_io_t {
 	int va;		//all of this config stuff must be in 1 int
 	int ff;
 	int Oxff;
-	int addrbytes;
+	size_t addrbytes;
 	int aslr;
 	int autofd;
 	int cached;
 	bool cachemode; // write in cache all the read operations (EXPERIMENTAL)
 	int p_cache;
-	int debug;
-//#warning remove debug from RIO
 	RIDPool *map_ids;
-	SdbList *maps; //from tail backwards maps with higher priority are found
+	RPVector maps; //from tail backwards maps with higher priority are found
 	RPVector map_skyline; // map parts that are not covered by others
-	RPVector map_skyline_shadow; // map parts that are not covered by others
 	RIDStorage *files;
 	RCache *buffer;
 	RList *cache;	//sdblist?
@@ -102,6 +99,7 @@ typedef struct r_io_t {
 	RIOUndo undo;
 	SdbList *plugins;
 	char *runprofile;
+	char *envprofile;
 #if USE_PTRACE_WRAP
 	struct ptrace_wrap_instance_t *ptrace_wrap;
 #endif
@@ -109,11 +107,8 @@ typedef struct r_io_t {
 	struct w32dbg_wrap_instance_t *w32dbg_wrap;
 #endif
 	char *args;
-	void *user;
 	PrintfCallback cb_printf;
-	int (*cb_core_cmd)(void *user, const char *str);
-	char* (*cb_core_cmdstr)(void *user, const char *str);
-	void (*cb_core_post_write)(void *user, ut64 maddr, ut8 *orig_bytes, int orig_len);
+	RCoreBind corebind;
 } RIO;
 
 typedef struct r_io_desc_t {
@@ -136,22 +131,12 @@ typedef struct {
 	void *data;
 } RIODescData;
 
-// #warning move RIORap somewhere else
+// Move somewhere else?
 typedef struct {
 	RSocket *fd;
 	RSocket *client;
-	int listener;
+	bool listener;
 } RIORap;
-
-#define RMT_MAX    4096
-#define RMT_OPEN   0x01
-#define RMT_READ   0x02
-#define RMT_WRITE  0x03
-#define RMT_SEEK   0x04
-#define RMT_CLOSE  0x05
-#define RMT_SYSTEM 0x06
-#define RMT_CMD    0x07
-#define RMT_REPLY  0x80
 
 typedef struct r_io_plugin_t {
 	const char *name;
@@ -354,7 +339,7 @@ R_API bool r_io_resize (RIO *io, ut64 newsize);
 R_API int r_io_extend_at (RIO *io, ut64 addr, ut64 size);
 R_API bool r_io_set_write_mask (RIO *io, const ut8 *mask, int len);
 R_API void r_io_bind(RIO *io, RIOBind *bnd);
-R_API int r_io_shift (RIO *io, ut64 start, ut64 end, st64 move);
+R_API bool r_io_shift (RIO *io, ut64 start, ut64 end, st64 move);
 R_API ut64 r_io_seek (RIO *io, ut64 offset, int whence);
 R_API int r_io_fini (RIO *io);
 R_API void r_io_free (RIO *io);
@@ -493,6 +478,7 @@ extern RIOPlugin r_io_plugin_malloc;
 extern RIOPlugin r_io_plugin_sparse;
 extern RIOPlugin r_io_plugin_ptrace;
 extern RIOPlugin r_io_plugin_w32dbg;
+extern RIOPlugin r_io_plugin_windbg;
 extern RIOPlugin r_io_plugin_mach;
 extern RIOPlugin r_io_plugin_debug;
 extern RIOPlugin r_io_plugin_shm;
@@ -507,7 +493,7 @@ extern RIOPlugin r_io_plugin_default;
 extern RIOPlugin r_io_plugin_ihex;
 extern RIOPlugin r_io_plugin_self;
 extern RIOPlugin r_io_plugin_gzip;
-extern RIOPlugin r_io_plugin_windbg;
+extern RIOPlugin r_io_plugin_winkd;
 extern RIOPlugin r_io_plugin_r2pipe;
 extern RIOPlugin r_io_plugin_r2web;
 extern RIOPlugin r_io_plugin_qnx;
@@ -519,6 +505,7 @@ extern RIOPlugin r_io_plugin_ar;
 extern RIOPlugin r_io_plugin_rbuf;
 extern RIOPlugin r_io_plugin_winedbg;
 extern RIOPlugin r_io_plugin_gprobe;
+extern RIOPlugin r_io_plugin_fd;
 
 #if __cplusplus
 }

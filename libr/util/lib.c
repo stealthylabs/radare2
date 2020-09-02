@@ -1,13 +1,12 @@
-/* radare - LGPL - Copyright 2008-2019 - pancake */
+/* radare - LGPL - Copyright 2008-2020 - pancake */
 
 #include <r_util.h>
 #include <r_lib.h>
 
-// TODO: boolify
-#define IFDBG if(__has_debug)
-
 R_LIB_VERSION(r_lib);
 
+/* TODO: avoid globals */
+#define IFDBG if(__has_debug)
 static bool __has_debug = false;
 
 /* XXX : this must be registered in runtime */
@@ -35,6 +34,7 @@ R_API int r_lib_types_get_i(const char *str) {
 
 R_API void *r_lib_dl_open(const char *libname) {
 	void *ret = NULL;
+#if WANT_DYLINK
 #if __UNIX__
 	if (libname) {
 		ret = dlopen (libname, RTLD_GLOBAL | RTLD_LAZY);
@@ -64,14 +64,19 @@ R_API void *r_lib_dl_open(const char *libname) {
 		eprintf ("r_lib_dl_open: error: %s\n", libname);
 	}
 #endif
+#endif
 	return ret;
 }
 
 R_API void *r_lib_dl_sym(void *handler, const char *name) {
+#if WANT_DYLINK
 #if __UNIX__
 	return dlsym (handler, name);
 #elif __WINDOWS__
 	return GetProcAddress (handler, name);
+#else
+	return NULL;
+#endif
 #else
 	return NULL;
 #endif
@@ -152,13 +157,7 @@ err:
 R_API RLib *r_lib_new(const char *symname, const char *symnamefunc) {
 	RLib *lib = R_NEW (RLib);
 	if (lib) {
-		char *e = r_sys_getenv ("R_DEBUG");
-		if (e) {
-			__has_debug = *e;
-			free (e);
-		} else {
-			__has_debug = false;
-		}
+		__has_debug = r_sys_getenv_asbool ("R2_DEBUG");
 		lib->handlers = r_list_newf (free);
 		lib->plugins = r_list_newf (free);
 		lib->symname = strdup (symname? symname: R_LIB_SYMNAME);
@@ -297,10 +296,27 @@ R_API int r_lib_open(RLib *lib, const char *file) {
 	return res;
 }
 
+static char *major_minor(const char *s) {
+	char *a = strdup (s);
+	char *p = strchr (a, '.');
+	if (p) {
+		p = strchr (p + 1, '.');
+		if (p) {
+			*p = 0;
+		}
+	}
+	return a;
+}
+
 R_API int r_lib_open_ptr(RLib *lib, const char *file, void *handler, RLibStruct *stru) {
 	r_return_val_if_fail (lib && file && stru, -1);
 	if (stru->version) {
-		if (strcmp (stru->version, R2_VERSION)) {
+		char *mm0 = major_minor (stru->version);
+		char *mm1 = major_minor (R2_VERSION);
+		bool mismatch = strcmp (mm0, mm1);
+		free (mm0);
+		free (mm1);
+		if (mismatch) {
 			eprintf ("Module version mismatch %s (%s) vs (%s)\n",
 				file, stru->version, R2_VERSION);
 			if (stru->pkgname) {
@@ -337,6 +353,7 @@ R_API int r_lib_open_ptr(RLib *lib, const char *file, void *handler, RLibStruct 
 }
 
 R_API bool r_lib_opendir(RLib *lib, const char *path) {
+#if WANT_DYLINK
 	r_return_val_if_fail (lib && path, false);
 #if __WINDOWS__
 	wchar_t file[1024];
@@ -404,6 +421,7 @@ R_API bool r_lib_opendir(RLib *lib, const char *path) {
 		}
 	}
 	closedir (dh);
+#endif
 #endif
 	return true;
 }

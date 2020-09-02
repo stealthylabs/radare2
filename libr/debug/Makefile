@@ -1,8 +1,8 @@
 include ../config.mk
 
 NAME=r_debug
-DEPS=r_reg r_anal r_bp r_io r_parse r_cons r_syscall r_hash r_flag r_util r_egg
-DEPS+=r_socket
+R2DEPS=r_reg r_anal r_bp r_io r_parse r_cons r_syscall r_hash r_flag r_util r_egg r_crypto
+R2DEPS+=r_socket
 CFLAGS+=-DR2_PLUGIN_INCORE
 
 ifeq ($(OSTYPE),bsd)
@@ -23,8 +23,8 @@ CFLAGS+=-DXNU_USE_PTRACE=$(XNU_USE_PTRACE)
 
 STATIC_OBJS=$(subst ..,p/..,$(subst debug_,p/debug_,$(STATIC_OBJ)))
 
-OBJS=signal.o map.o trace.o arg.o debug.o plugin.o snap.o session.o
-OBJS+=pid.o dreg.o ddesc.o esil.o ${STATIC_OBJS}
+OBJS=dsignal.o dmap.o trace.o arg.o debug.o plugin.o snap.o dsession.o
+OBJS+=pid.o dreg.o ddesc.o desil.o ${STATIC_OBJS}
 
 ifeq (${OSTYPE},darwin)
 ifneq (${NATIVE_OBJS},)

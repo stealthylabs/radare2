@@ -6,6 +6,9 @@
 #include <r_io.h>
 #include <r_cons.h>
 #include <r_list.h>
+
+typedef struct r_bin_t RBin;
+
 #include <r_bin_dwarf.h>
 #include <r_pdb.h>
 
@@ -205,12 +208,14 @@ typedef struct r_bin_info_t {
 	char *arch;
 	char *cpu;
 	char *machine;
+	char *head_flag;
 	char *os;
 	char *subsystem;
 	char *rpath;
 	char *guid;
 	char *debug_file_name;
 	const char *lang;
+	char *default_cc;
 	RList/*<RBinFileHash>*/ *file_hashes;
 	int bits;
 	int has_va;
@@ -301,7 +306,7 @@ typedef struct r_bin_file_options_t {
 	// const char *xtrname;
 } RBinFileOptions;
 
-typedef struct r_bin_t {
+struct r_bin_t {
 	const char *file;
 	RBinFile *cur; // TODO: deprecate
 	int narch;
@@ -330,13 +335,14 @@ typedef struct r_bin_t {
 	char *strpurge; // purge false positive strings
 	char *srcdir; // dir.source
 	char *prefix; // bin.prefix
+	char *strenc;
 	ut64 filter_rules;
 	bool demanglercmd;
 	bool verbose;
 	bool use_xtr; // use extract plugins when loading a file?
 	bool use_ldr; // use loader plugins when loading a file?
 	RStrConstPool constpool;
-} RBin;
+};
 
 typedef struct r_bin_xtr_metadata_t {
 	char *arch;
@@ -577,6 +583,7 @@ typedef struct r_bin_field_t {
 	ut64 vaddr;
 	ut64 paddr;
 	int size;
+	int offset;
 	ut32 visibility;
 	char *name;
 	char *type;
@@ -606,7 +613,7 @@ typedef struct r_bin_map_t {
 } RBinMap;
 
 typedef struct r_bin_dbginfo_t {
-	int (*get_line)(RBinFile *arch, ut64 addr, char *file, int len, int *line);
+	bool (*get_line)(RBinFile *arch, ut64 addr, char *file, int len, int *line);
 } RBinDbgInfo;
 
 typedef struct r_bin_write_t {
@@ -790,7 +797,7 @@ R_API const char *r_bin_get_meth_flag_string(ut64 flag, bool compact);
 R_API RBinSection *r_bin_get_section_at(RBinObject *o, ut64 off, int va);
 
 /* dbginfo.c */
-R_API int r_bin_addr2line(RBin *bin, ut64 addr, char *file, int len, int *line);
+R_API bool r_bin_addr2line(RBin *bin, ut64 addr, char *file, int len, int *line);
 R_API char *r_bin_addr2text(RBin *bin, ut64 addr, int origin);
 R_API char *r_bin_addr2fileline(RBin *bin, ut64 addr);
 /* bin_write.c */
@@ -800,10 +807,6 @@ R_API bool r_bin_wr_scn_perms(RBin *bin, const char *name, int perms);
 R_API bool r_bin_wr_rpath_del(RBin *bin);
 R_API bool r_bin_wr_entry(RBin *bin, ut64 addr);
 R_API bool r_bin_wr_output(RBin *bin, const char *filename);
-R_API int r_bin_dwarf_parse_info(RBinDwarfDebugAbbrev *da, RBin *a, int mode);
-R_API RList *r_bin_dwarf_parse_line(RBin *a, int mode);
-R_API RList *r_bin_dwarf_parse_aranges(RBin *a, int mode);
-R_API RBinDwarfDebugAbbrev *r_bin_dwarf_parse_abbrev(RBin *a, int mode);
 
 R_API RList *r_bin_get_mem(RBin *bin);
 
@@ -874,6 +877,7 @@ extern RBinPlugin r_bin_plugin_sfc;
 extern RBinPlugin r_bin_plugin_z64;
 extern RBinPlugin r_bin_plugin_prg;
 extern RBinPlugin r_bin_plugin_dmp64;
+extern RBinPlugin r_bin_plugin_pyc;
 
 #ifdef __cplusplus
 }

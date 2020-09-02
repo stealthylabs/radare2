@@ -31,6 +31,15 @@ static void open_pidmem (RIOPtrace *iop);
 extern int errno;
 #endif
 
+// PTRACE_GETSIGINFO is defined only since glibc 2.4 but appeared much
+// earlier in linux kernel - since 2.3.99-pre6
+// So we define it manually
+#if __linux__ && defined(__GLIBC__)
+#ifndef PTRACE_GETSIGINFO
+#define PTRACE_GETSIGINFO 0x4202
+#endif
+#endif
+
 #if 0
 procpidmem is buggy.. running this sometimes results in ffff
 
@@ -45,7 +54,7 @@ static int __waitpid(int pid) {
 
 #define debug_read_raw(io,x,y) r_io_ptrace((io), PTRACE_PEEKTEXT, (x), (void *)(y), R_PTRACE_NODATA)
 #define debug_write_raw(io,x,y,z) r_io_ptrace((io), PTRACE_POKEDATA, (x), (void *)(y), (r_ptrace_data_t)(z))
-#if __OpenBSD__ || __KFBSD__
+#if __OpenBSD__ || __NetBSD__ || __KFBSD__
 typedef int ptrace_word;   // int ptrace(int request, pid_t pid, caddr_t addr, int data);
 #else
 typedef size_t ptrace_word; // long ptrace(enum __ptrace_request request, pid_t pid, void *addr, void *data);
@@ -178,14 +187,18 @@ static bool __plugin_open(RIO *io, const char *file, bool many) {
 	return false;
 }
 
-static inline bool is_pid_already_attached (RIO *io, int pid, void *data) {
+static inline bool is_pid_already_attached(RIO *io, int pid) {
 #if defined(__linux__)
-	siginfo_t *sig = (siginfo_t *)data;
-	return -1 != r_io_ptrace (io, PTRACE_GETSIGINFO, pid, NULL, sig);
+	siginfo_t sig = { 0 };
+	return r_io_ptrace (io, PTRACE_GETSIGINFO, pid, NULL, &sig) != -1;
 #elif defined(__FreeBSD__)
-	struct ptrace_lwpinfo *info = (struct ptrace_lwpinfo *)data;
-	int len = (int)sizeof (*info);
-	return -1 != r_io_ptrace (io, PT_LWPINFO, pid, info, len);
+	struct ptrace_lwpinfo info = { 0 };
+	int len = (int)sizeof (info);
+	return r_io_ptrace (io, PT_LWPINFO, pid, &info, len) != -1;
+#elif defined(__OpenBSD__) || defined(__NetBSD__)
+	ptrace_state_t state = { 0 };
+	int len = (int)sizeof (state);
+	return r_io_ptrace (io, PT_GET_PROCESS_STATE, pid, &state, len) != -1;
 #else
 	return false;
 #endif
@@ -194,13 +207,6 @@ static inline bool is_pid_already_attached (RIO *io, int pid, void *data) {
 static RIODesc *__open(RIO *io, const char *file, int rw, int mode) {
 	RIODesc *desc = NULL;
 	int ret = -1;
-#if defined(__linux__)
-	siginfo_t sig = { 0 };
-#elif defined(__FreeBSD__)
-	struct ptrace_lwpinfo sig = { 0 };
-#else
-	int sig = 0;
-#endif
 
 	if (!__plugin_open (io, file, 0)) {
 		return NULL;
@@ -210,7 +216,7 @@ static RIODesc *__open(RIO *io, const char *file, int rw, int mode) {
 
 	// Safely check if the PID has already been attached to avoid printing errors
 	// and attempt attaching on failure
-	if (!is_pid_already_attached(io, pid, &sig)) {
+	if (!is_pid_already_attached (io, pid)) {
 		ret = r_io_ptrace (io, PTRACE_ATTACH, pid, 0, 0);
 		if (ret == -1) {
 #ifdef __ANDROID__
@@ -225,9 +231,11 @@ static RIODesc *__open(RIO *io, const char *file, int rw, int mode) {
 				perror ("ptrace: Cannot attach");
 				eprintf ("ERRNO: %d (EINVAL)\n", errno);
 				break;
+			default:
+				break;
 			}
-#endif
 			return NULL;
+#endif
 		} else if (__waitpid (pid)) {
 			ret = pid;
 		} else {
@@ -276,6 +284,10 @@ static int __close(RIODesc *desc) {
 	RIOPtrace *riop = desc->data;
 	desc->data = NULL;
 	long ret = r_io_ptrace (desc->io, PTRACE_DETACH, pid, 0, 0);
+	if (errno == ESRCH) {
+		// process does not exist, may have been killed earlier -- continue as normal
+		ret = 0;
+	}
 	free (riop);
 	return ret;
 }

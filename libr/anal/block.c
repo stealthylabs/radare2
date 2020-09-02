@@ -1,6 +1,7 @@
 /* radare - LGPL - Copyright 2019-2020 - pancake, thestr4ng3r */
 
 #include <r_anal.h>
+#include <ht_uu.h>
 
 #include <assert.h>
 
@@ -305,7 +306,7 @@ R_API RAnalBlock *r_anal_block_split(RAnalBlock *bbi, ut64 addr) {
 }
 
 R_API bool r_anal_block_merge(RAnalBlock *a, RAnalBlock *b) {
-	if (a->addr + a->size != b->addr) {
+	if (!r_anal_block_is_contiguous (a, b)) {
 		return false;
 	}
 
@@ -362,9 +363,6 @@ R_API void r_anal_block_unref(RAnalBlock *bb) {
 		r_rbtree_aug_delete (&anal->bb_tree, &bb->addr, __bb_addr_cmp, NULL, __block_free_rb, NULL, __max_end);
 	}
 }
-
-typedef bool (*RAnalBlockCb)(RAnalBlock *block, void *user);
-typedef bool (*RAnalAddrCb)(ut64 addr, void *user);
 
 R_API bool r_anal_block_successor_addrs_foreach(RAnalBlock *block, RAnalAddrCb cb, void *user) {
 #define CB_ADDR(addr) do { \
@@ -439,6 +437,102 @@ beach:
 	return !breaked;
 }
 
+R_API bool r_anal_block_recurse_followthrough(RAnalBlock *block, RAnalBlockCb cb, void *user) {
+	bool breaked = false;
+	RAnalBlockRecurseContext ctx;
+	ctx.anal = block->anal;
+	r_pvector_init (&ctx.to_visit, NULL);
+	ctx.visited = ht_up_new0 ();
+	if (!ctx.visited) {
+		goto beach;
+	}
+
+	ht_up_insert (ctx.visited, block->addr, NULL);
+	r_pvector_push (&ctx.to_visit, block);
+
+	while (!r_pvector_empty (&ctx.to_visit)) {
+		RAnalBlock *cur = r_pvector_pop (&ctx.to_visit);
+		bool b = !cb (cur, user);
+		if (b) {
+			breaked = true;
+		} else {
+			r_anal_block_successor_addrs_foreach (cur, block_recurse_successor_cb, &ctx);
+		}
+	}
+
+beach:
+	ht_up_free (ctx.visited);
+	r_pvector_clear (&ctx.to_visit);
+	return !breaked;
+}
+
+typedef struct {
+	RAnalBlock *bb;
+	RListIter *switch_it;
+} RecurseDepthFirstCtx;
+
+R_API bool r_anal_block_recurse_depth_first(RAnalBlock *block, RAnalBlockCb cb, R_NULLABLE RAnalBlockCb on_exit, void *user) {
+	bool breaked = false;
+	HtUP *visited = ht_up_new0 ();
+	if (!visited) {
+		goto beach;
+	}
+	RAnal *anal = block->anal;
+	RVector path;
+	r_vector_init (&path, sizeof (RecurseDepthFirstCtx), NULL, NULL);
+	RAnalBlock *cur_bb = block;
+	RecurseDepthFirstCtx ctx = { cur_bb, NULL };
+	r_vector_push (&path, &ctx);
+	ht_up_insert (visited, cur_bb->addr, NULL);
+	breaked = !cb (cur_bb, user);
+	if (breaked) {
+		goto beach;
+	}
+	do {
+		RecurseDepthFirstCtx *cur_ctx = r_vector_index_ptr (&path, path.len - 1);
+		cur_bb = cur_ctx->bb;
+		if (cur_bb->jump != UT64_MAX && !ht_up_find_kv (visited, cur_bb->jump, NULL)) {
+			cur_bb = r_anal_get_block_at (anal, cur_bb->jump);
+		} else if (cur_bb->fail != UT64_MAX && !ht_up_find_kv (visited, cur_bb->fail, NULL)) {
+			cur_bb = r_anal_get_block_at (anal, cur_bb->fail);
+		} else {
+			RAnalCaseOp *cop = NULL;
+			if (cur_bb->switch_op && !cur_ctx->switch_it) {
+				cur_ctx->switch_it = cur_bb->switch_op->cases->head;
+				cop = r_list_first (cur_bb->switch_op->cases);
+			} else if (cur_ctx->switch_it) {
+				while ((cur_ctx->switch_it = r_list_iter_get_next (cur_ctx->switch_it))) {
+					cop = r_list_iter_get_data (cur_ctx->switch_it);
+					if (!ht_up_find_kv (visited, cop->jump, NULL)) {
+						break;
+					}
+					cop = NULL;
+				}
+			}
+			cur_bb = cop ? r_anal_get_block_at (anal, cop->jump) : NULL;
+		}
+		if (cur_bb) {
+			RecurseDepthFirstCtx ctx = { cur_bb, NULL };
+			r_vector_push (&path, &ctx);
+			ht_up_insert (visited, cur_bb->addr, NULL);
+			bool breaked = !cb (cur_bb, user);
+			if (breaked) {
+				break;
+			}
+		} else {
+			if (on_exit) {
+				on_exit (cur_ctx->bb, user);
+			}
+			r_vector_pop (&path, NULL);
+		}
+	} while (!r_vector_empty (&path));
+
+beach:
+	ht_up_free (visited);
+	r_vector_clear (&path);
+	return !breaked;
+}
+
 static bool recurse_list_cb(RAnalBlock *block, void *user) {
 	RList *list = user;
 	r_anal_block_ref (block);
@@ -454,13 +548,30 @@ R_API RList *r_anal_block_recurse_list(RAnalBlock *block) {
 	return ret;
 }
 
-R_API void r_anal_block_add_switch_case(RAnalBlock *block, ut64 switch_addr, ut64 case_addr) {
+R_API void r_anal_block_add_switch_case(RAnalBlock *block, ut64 switch_addr, ut64 case_value, ut64 case_addr) {
 	if (!block->switch_op) {
 		block->switch_op = r_anal_switch_op_new (switch_addr, 0, 0, 0);
 	}
-	r_anal_switch_op_add_case (block->switch_op, case_addr, 0, case_addr);
+	r_anal_switch_op_add_case (block->switch_op, case_addr, case_value, case_addr);
 }
 
+R_API bool r_anal_block_op_starts_at(RAnalBlock *bb, ut64 addr) {
+	if (!r_anal_block_contains (bb, addr)) {
+		return false;
+	}
+	ut64 off = addr - bb->addr;
+	if (off > UT16_MAX) {
+		return false;
+	}
+	size_t i;
+	for (i = 0; i < bb->ninstr; i++) {
+		ut16 inst_off = r_anal_bb_offset_inst (bb, i);
+		if (off == inst_off) {
+			return true;
+		}
+	}
+	return false;
+}
 
 typedef struct {
 	RAnal *anal;
@@ -543,3 +654,248 @@ beach:
 	return ret;
 }
 
+typedef struct {
+	RAnalBlock *block;
+	bool reachable;
+} NoreturnSuccessor;
+
+static void noreturn_successor_free(HtUPKv *kv) {
+	NoreturnSuccessor *succ = kv->value;
+	r_anal_block_unref (succ->block);
+	free (succ);
+}
+
+static bool noreturn_successors_cb(RAnalBlock *block, void *user) {
+	HtUP *succs = user;
+	NoreturnSuccessor *succ = R_NEW0 (NoreturnSuccessor);
+	if (!succ) {
+		return false;
+	}
+	r_anal_block_ref (block);
+	succ->block = block;
+	succ->reachable = false; // reset for first iteration
+	ht_up_insert (succs, block->addr, succ);
+	return true;
+}
+
+static bool noreturn_successors_reachable_cb(RAnalBlock *block, void *user) {
+	HtUP *succs = user;
+	NoreturnSuccessor *succ = ht_up_find (succs, block->addr, NULL);
+	if (succ) {
+		succ->reachable = true;
+	}
+	return true;
+}
+
+static bool noreturn_remove_unreachable_cb(void *user, const ut64 k, const void *v) {
+	RAnalFunction *fcn = user;
+	NoreturnSuccessor *succ = (NoreturnSuccessor *)v;
+	if (!succ->reachable && r_list_contains (succ->block->fcns, fcn)) {
+		r_anal_function_remove_block (fcn, succ->block);
+	}
+	succ->reachable = false; // reset for next iteration
+	return true;
+}
+
+static bool noreturn_get_blocks_cb(void *user, const ut64 k, const void *v) {
+	RList *blocks = user;
+	NoreturnSuccessor *succ = (NoreturnSuccessor *)v;
+	r_anal_block_ref (succ->block);
+	r_list_push (blocks, succ->block);
+	return true;
+}
+
+R_API RAnalBlock *r_anal_block_chop_noreturn(RAnalBlock *block, ut64 addr) {
+	r_return_val_if_fail (block, NULL);
+	if (!r_anal_block_contains (block, addr) || addr == block->addr) {
+		return block;
+	}
+	r_anal_block_ref (block);
+
+	// Cache all recursive successors of block here.
+	// These are the candidates that we might have to remove from functions later.
+	HtUP *succs = ht_up_new (NULL, noreturn_successor_free, NULL); // maps block addr (ut64) => NoreturnSuccessor *
+	if (!succs) {
+		return block;
+	}
+	r_anal_block_recurse (block, noreturn_successors_cb, succs);
+
+	// Chop the block. Resize and remove all destination addrs
+	r_anal_block_set_size (block, addr - block->addr);
+	block->jump = UT64_MAX;
+	block->fail = UT64_MAX;
+	r_anal_switch_op_free (block->switch_op);
+	block->switch_op = NULL;
+
+	// Now, for each fcn, check which of our successors are still reachable in the function remove and the ones that are not.
+	RListIter *it;
+	RAnalFunction *fcn;
+	// We need to clone the list because block->fcns will get modified in the loop
+	RList *fcns_cpy = r_list_clone (block->fcns);
+	r_list_foreach (fcns_cpy, it, fcn) {
+		RAnalBlock *entry = r_anal_get_block_at (block->anal, fcn->addr);
+		if (entry && r_list_contains (entry->fcns, fcn)) {
+			r_anal_block_recurse (entry, noreturn_successors_reachable_cb, succs);
+		}
+		ht_up_foreach (succs, noreturn_remove_unreachable_cb, fcn);
+	}
+	r_list_free (fcns_cpy);
+
+	// This last step isn't really critical, but nice to have.
+	// Prepare to merge blocks with their predecessors if possible
+	RList merge_blocks;
+	r_list_init (&merge_blocks);
+	merge_blocks.free = (RListFree)r_anal_block_unref;
+	ht_up_foreach (succs, noreturn_get_blocks_cb, &merge_blocks);
+
+	// Free/unref BEFORE doing the merge!
+	// Some of the blocks might not be valid anymore later!
+	r_anal_block_unref (block);
+	ht_up_free (succs);
+
+	ut64 block_addr = block->addr; // save the addr to identify the block. the automerge might free it so we must not use the pointer!
+
+	// Do the actual merge
+	r_anal_block_automerge (&merge_blocks);
+
+	// No try to recover the pointer to the block if it still exists
+	RAnalBlock *ret = NULL;
+	for (it = merge_blocks.head; it && (block = it->data, 1); it = it->n) {
+		if (block->addr == block_addr) {
+			// block is still there
+			ret = block;
+			break;
+		}
+	}
+
+	r_list_purge (&merge_blocks);
+	return ret;
+}
+
+typedef struct {
+	HtUP *predecessors; // maps a block to its predecessor if it has exactly one, or NULL if there are multiple or the predecessor has multiple successors
+	HtUP *visited_blocks; // during predecessor search, mark blocks whose successors we already checked. Value is void *-casted count of successors
+	HtUP *blocks; // adresses of the blocks we might want to merge with their predecessors => RAnalBlock *
+
+	RAnalBlock *cur_pred;
+	size_t cur_succ_count;
+} AutomergeCtx;
+
+static bool automerge_predecessor_successor_cb(ut64 addr, void *user) {
+	AutomergeCtx *ctx = user;
+	ctx->cur_succ_count++;
+	RAnalBlock *block = ht_up_find (ctx->blocks, addr, NULL);
+	if (!block) {
+		// we shouldn't merge this one so GL_DONT_CARE
+		return true;
+	}
+	bool found;
+	RAnalBlock *pred = ht_up_find (ctx->predecessors, (ut64)block, &found);
+	if (found) {
+		if (pred) {
+			// only one predecessor found so far, but we are the second so there are multiple now
+			ht_up_update (ctx->predecessors, (ut64) block, NULL);
+		} // else: already found multiple predecessors, nothing to do
+	} else {
+		// no predecessor found yet, this is the only one until now
+		ht_up_insert (ctx->predecessors, (ut64) block, ctx->cur_pred);
+	}
+	return true;
+}
+
+static bool automerge_get_predecessors_cb(void *user, const ut64 k, const void *v) {
+	AutomergeCtx *ctx = user;
+	const RAnalFunction *fcn = (const RAnalFunction *)k;
+	RListIter *it;
+	RAnalBlock *block;
+	r_list_foreach (fcn->bbs, it, block) {
+		bool already_visited;
+		ht_up_find (ctx->visited_blocks, (ut64)block, &already_visited);
+		if (already_visited) {
+			continue;
+		}
+		ctx->cur_pred = block;
+		ctx->cur_succ_count = 0;
+		r_anal_block_successor_addrs_foreach (block, automerge_predecessor_successor_cb, ctx);
+		ht_up_insert (ctx->visited_blocks, (ut64)block, (void *)ctx->cur_succ_count);
+	}
+	return true;
+}
+
+// Try to find the contiguous predecessors of all given blocks and merge them if possible,
+// i.e. if there are no other blocks that have this block as one of their successors
+R_API void r_anal_block_automerge(RList *blocks) {
+	r_return_if_fail (blocks);
+	AutomergeCtx ctx = {
+		.predecessors = ht_up_new0 (),
+		.visited_blocks = ht_up_new0 (),
+		.blocks = ht_up_new0 ()
+	};
+
+	HtUP *relevant_fcns = ht_up_new0 (); // all the functions that contain some of our blocks (ht abused as a set)
+	RList *fixup_candidates = r_list_new (); // used further down
+	if (!ctx.predecessors || !ctx.visited_blocks || !ctx.blocks || !relevant_fcns || !fixup_candidates) {
+		goto beach;
+	}
+
+	// Get all the functions and prepare ctx.blocks
+	RListIter *it;
+	RAnalBlock *block;
+	r_list_foreach (blocks, it, block) {
+		RListIter *fit;
+		RAnalFunction *fcn;
+		r_list_foreach (block->fcns, fit, fcn) {
+			ht_up_insert (relevant_fcns, (ut64)fcn, NULL);
+		}
+		ht_up_insert (ctx.blocks, block->addr, block);
+	}
+
+	// Get the single predecessors we might want to merge with
+	ht_up_foreach (relevant_fcns, automerge_get_predecessors_cb, &ctx);
+
+	// Now finally do the merging
+	RListIter *tmp;
+	r_list_foreach_safe (blocks, it, tmp, block) {
+		RAnalBlock *predecessor = ht_up_find (ctx.predecessors, (ut64)block, NULL);
+		if (!predecessor) {
+			continue;
+		}
+		size_t pred_succs_count = (size_t)ht_up_find (ctx.visited_blocks, (ut64)predecessor, NULL);
+		if (pred_succs_count != 1) {
+			// we can only merge this predecessor if it has exactly one successor
+			continue;
+		}
+
+		// We are about to merge block into predecessor
+		// However if there are other blocks that have block as the predecessor,
+		// we would uaf after the merge since block will be freed.
+		RListIter *bit;
+		RAnalBlock *clock;
+		for (bit = it->n; bit && (clock = bit->data, 1); bit = bit->n) {
+			RAnalBlock *fixup_pred = ht_up_find (ctx.predecessors, (ut64)clock, NULL);
+			if (fixup_pred == block) {
+				r_list_push (fixup_candidates, clock);
+			}
+		}
+
+		if (r_anal_block_merge (predecessor, block)) { // r_anal_block_merge() does checks like contiguous, to that's fine
+			// block was merged into predecessor, it is now freed!
+			r_list_foreach (fixup_candidates, bit, clock) {
+				// Make sure all previous pointers to block now go to predecessor
+				ht_up_update (ctx.predecessors, (ut64)clock, predecessor);
+			}
+			// Remove it from the list
+			r_list_split_iter (blocks, it);
+			free (it);
+		}
+
+		r_list_purge (fixup_candidates);
+	}
+
+beach:
+	ht_up_free (ctx.predecessors);
+	ht_up_free (ctx.visited_blocks);
+	ht_up_free (ctx.blocks);
+	ht_up_free (relevant_fcns);
+	r_list_free (fixup_candidates);
+}

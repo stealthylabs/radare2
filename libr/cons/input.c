@@ -48,7 +48,7 @@ R_API int r_cons_controlz(int ch) {
 // 97 - wheel down
 // 95 - mouse up
 // 92 - mouse down
-static int __parseMouseEvent() {
+static int __parseMouseEvent(void) {
 	char xpos[32];
 	char ypos[32];
 	(void)r_cons_readchar (); // skip first char
@@ -98,29 +98,31 @@ static bool is_arrow;
 
 R_API int r_cons_arrow_to_hjkl(int ch) {
 #if __WINDOWS__
-	if (is_arrow) {
-		switch (ch) {
-		case VK_DOWN: // key down
-			ch = bCtrl ? 'J' : 'j';
-			break;
-		case VK_RIGHT: // key right
-			ch = bCtrl ? 'L' : 'l';
-			break;
-		case VK_UP: // key up
-			ch = bCtrl ? 'K' : 'k';
-			break;
-		case VK_LEFT: // key left
-			ch = bCtrl ? 'H' : 'h';
-			break;
-		case VK_PRIOR: // key home
-			ch = 'K';
-			break;
-		case VK_NEXT: // key end
-			ch = 'J';
-			break;
+	if (I->vtmode != 2) {
+		if (is_arrow) {
+			switch (ch) {
+			case VK_DOWN: // key down
+				ch = bCtrl ? 'J' : 'j';
+				break;
+			case VK_RIGHT: // key right
+				ch = bCtrl ? 'L' : 'l';
+				break;
+			case VK_UP: // key up
+				ch = bCtrl ? 'K' : 'k';
+				break;
+			case VK_LEFT: // key left
+				ch = bCtrl ? 'H' : 'h';
+				break;
+			case VK_PRIOR: // key home
+				ch = 'K';
+				break;
+			case VK_NEXT: // key end
+				ch = 'J';
+				break;
+			}
 		}
+		return I->mouse_event && (ut8)ch == UT8_MAX ? 0 : ch;
 	}
-	return I->mouse_event && (ut8)ch == UT8_MAX ? 0 : ch;
 #endif
 	I->mouse_event = 0;
 	/* emacs */
@@ -416,14 +418,20 @@ static int __cons_readchar_w32(ut32 usec) {
 	is_arrow = false;
 	DWORD mode, out;
 	HANDLE h;
-	INPUT_RECORD irInBuf;
-	bool resize = false;
+	INPUT_RECORD irInBuf = { { 0 } };
+	CONSOLE_SCREEN_BUFFER_INFO info = { { 0 } };
+	bool mouse_enabled = I->mouse;
 	bool click_n_drag = false;
 	void *bed;
 	I->mouse_event = 0;
 	h = GetStdHandle (STD_INPUT_HANDLE);
 	GetConsoleMode (h, &mode);
-	SetConsoleMode (h, ENABLE_WINDOW_INPUT | ENABLE_MOUSE_INPUT | ENABLE_EXTENDED_FLAGS);
+	DWORD newmode = ENABLE_WINDOW_INPUT;
+	if (I->vtmode == 2) {
+		newmode |= ENABLE_VIRTUAL_TERMINAL_INPUT;
+	}
+	newmode |= mode;
+	SetConsoleMode (h, newmode);
 	do {
 		bed = r_cons_sleep_begin ();
 		if (usec) {
@@ -432,10 +440,23 @@ static int __cons_readchar_w32(ut32 usec) {
 				return -1;
 			}
 		}
-		ret = ReadConsoleInput (h, &irInBuf, 1, &out);
-		r_cons_enable_mouse (true);
+		if (I->term_xterm) {
+			ret = ReadFile (h, &ch, 1, &out, NULL);
+			if (ret) {
+				r_cons_sleep_end (bed);
+				return ch;
+			}
+		} else {
+			ret = ReadConsoleInput (h, &irInBuf, 1, &out);
+		}
 		r_cons_sleep_end (bed);
 		if (ret) {
+			if (irInBuf.EventType == MENU_EVENT || irInBuf.EventType == FOCUS_EVENT) {
+				continue;
+			}
+			if (mouse_enabled) {
+				r_cons_enable_mouse (true);
+			}
 			if (irInBuf.EventType == MOUSE_EVENT) {
 				if (irInBuf.Event.MouseEvent.dwEventFlags == MOUSE_MOVED) {
 					if (irInBuf.Event.MouseEvent.dwButtonState == FROM_LEFT_1ST_BUTTON_PRESSED) {
@@ -453,11 +474,10 @@ static int __cons_readchar_w32(ut32 usec) {
 				}
 				switch (irInBuf.Event.MouseEvent.dwButtonState) {
 				case FROM_LEFT_1ST_BUTTON_PRESSED:
-					r_cons_set_click (irInBuf.Event.MouseEvent.dwMousePosition.X + 1, irInBuf.Event.MouseEvent.dwMousePosition.Y + 1);
+					GetConsoleScreenBufferInfo (GetStdHandle (STD_OUTPUT_HANDLE), &info);
+					int rel_y = irInBuf.Event.MouseEvent.dwMousePosition.Y - info.srWindow.Top;
+					r_cons_set_click (irInBuf.Event.MouseEvent.dwMousePosition.X + 1, rel_y + 1);
 					ch = UT8_MAX;
-					break;
-				case RIGHTMOST_BUTTON_PRESSED:
-					r_cons_enable_mouse (false);
 					break;
 				} // TODO: Handle more buttons?
 			}
@@ -517,6 +537,10 @@ static int __cons_readchar_w32(ut32 usec) {
 							break;
 						case VK_F12:
 							ch = R_CONS_KEY_F12;
+						case VK_SHIFT:
+							if (mouse_enabled) {
+								r_cons_enable_mouse (false);
+							}
 							break;
 						default:
 							break;
@@ -525,14 +549,12 @@ static int __cons_readchar_w32(ut32 usec) {
 				}
 			}
 			if (irInBuf.EventType == WINDOW_BUFFER_SIZE_EVENT) {
-				resize = true;
-			}
-			if (resize) {
 				resizeWin ();
-				resize = false;
 			}
 		}
-		FlushConsoleInputBuffer (h);
+		if (I->vtmode != 2 && !I->term_xterm) {
+			FlushConsoleInputBuffer (h);
+		}
 	} while (ch == 0);
 	SetConsoleMode (h, mode);
 	return ch;
@@ -571,7 +593,7 @@ R_API bool r_cons_readpush(const char *str, int len) {
 	return false;
 }
 
-R_API void r_cons_readflush() {
+R_API void r_cons_readflush(void) {
 	R_FREE (readbuffer);
 	readbuffer_length = 0;
 }
@@ -584,7 +606,7 @@ R_API void r_cons_switchbuf(bool active) {
 extern volatile sig_atomic_t sigwinchFlag;
 #endif
 
-R_API int r_cons_readchar() {
+R_API int r_cons_readchar(void) {
 	char buf[2];
 	buf[0] = -1;
 	if (readbuffer_length > 0) {
@@ -593,10 +615,10 @@ R_API int r_cons_readchar() {
 		memmove (readbuffer, readbuffer + 1, readbuffer_length);
 		return ch;
 	}
+	r_cons_set_raw (1);
 #if __WINDOWS__
 	return __cons_readchar_w32 (0);
 #else
-	r_cons_set_raw (1);
 	void *bed = r_cons_sleep_begin ();
 
 	// Blocks until either stdin has something to read or a signal happens.
@@ -647,18 +669,21 @@ R_API bool r_cons_yesno(int def, const char *fmt, ...) {
 	va_end (ap);
 	fflush (stderr);
 	r_cons_set_raw (true);
-	(void)read (0, &key, 1);
-	write (2, " ", 1);
-	write (2, &key, 1);
-	write (2, "\n", 1);
-	if (key == 'Y') {
-		key = 'y';
+	char buf[] = " ?\n";
+	if (read (0, buf + 1, 1) == 1) {
+		key = (ut8)buf[1];
+		if (write (2, buf, 3) == 3) {
+			if (key == 'Y') {
+				key = 'y';
+			}
+			r_cons_set_raw (false);
+			if (key == '\n' || key == '\r') {
+				key = def;
+			}
+			return key == 'y';
+		}
 	}
-	r_cons_set_raw (false);
-	if (key == '\n' || key == '\r') {
-		key = def;
-	}
-	return key == 'y';
+	return false;
 }
 
 R_API char *r_cons_password(const char *msg) {

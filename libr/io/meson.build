@@ -1,14 +1,15 @@
 r_io_sources = [
-  'cache.c',
-  'desc.c',
-  'fd.c',
   'io.c',
+  'io_fd.c',
+  'io_map.c',
+  'io_cache.c',
+  'io_desc.c',
+  'io_plugin.c',
   'ioutils.c',
-  'map.c',
-  'plugin.c',
   'undo.c',
   'p_cache.c',
   'p/io_ar.c',
+  'p/io_fd.c',
   'p/io_bfdbg.c',
   'p/io_bochs.c',
   'p/io_debug.c',
@@ -34,7 +35,7 @@ r_io_sources = [
   'p/io_shm.c',
   'p/io_sparse.c',
   'p/io_tcp.c',
-  'p/io_windbg.c',
+  'p/io_winkd.c',
   'p/io_winedbg.c',
   'p/io_zip.c',
 ]
@@ -42,6 +43,7 @@ r_io_sources = [
 if host_machine.system() == 'windows'
   r_io_sources += [
     'p/io_r2k_windows.c',
+    'p/io_windbg.c',
     'p/io_w32.c',
     'p/io_w32dbg.c',
   ]
@@ -53,7 +55,7 @@ r_io_deps = [
   r_socket_dep,
   bochs_dep,
   gdb_dep,
-  windbg_dep,
+  winkd_dep,
   qnx_dep,
   zip_dep,
   ar_dep,
@@ -64,7 +66,7 @@ if host_machine.system() == 'windows'
   r_io_deps += w32dbg_wrap_dep
 endif
 
-if host_machine.system() == 'linux'
+if host_machine.system() == 'linux' or host_machine.system() == 'android'
   r_io_sources += [
     'p/io_r2k_linux.c',
   ]
@@ -93,6 +95,7 @@ pkgconfig_mod.generate(r_io,
   version: r2_version,
   name: 'r_io',
   filebase: 'r_io',
+  libraries: pkgcfg_sanitize_libs,
   requires: [
     'r_util',
     'r_socket'

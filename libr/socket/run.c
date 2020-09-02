@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2014-2017 - pancake */
+/* radare - LGPL - Copyright 2014-2020 - pancake */
 
 /* this helper api is here because it depends on r_util and r_socket */
 /* we should find a better place for it. r_io? */
@@ -9,6 +9,7 @@
 #include <r_socket.h>
 #include <r_util.h>
 #include <r_lib.h>
+#include <r_cons.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 
@@ -33,7 +34,6 @@
 #if __UNIX__
 #include <sys/ioctl.h>
 #include <sys/resource.h>
-#include <termios.h>
 #include <grp.h>
 #include <errno.h>
 #if defined(__sun)
@@ -56,58 +56,84 @@
 #include <process.h>  // to compile execv in msvc windows
 #endif
 
-#define HAVE_PTY __UNIX__ && !__ANDROID__ && LIBC_HAVE_FORK && !__sun
-
 #if EMSCRIPTEN
 #undef HAVE_PTY
 #define HAVE_PTY 0
+#else
+#define HAVE_PTY __UNIX__ && !__ANDROID__ && LIBC_HAVE_FORK && !__sun
+#endif
+
+
+#if HAVE_PTY
+static int (*dyn_openpty)(int *amaster, int *aslave, char *name, struct termios *termp, struct winsize *winp) = NULL;
+static int (*dyn_login_tty)(int fd) = NULL;
+static id_t (*dyn_forkpty)(int *amaster, char *name, struct termios *termp, struct winsize *winp) = NULL;
+static void dyn_init(void) {
+	if (!dyn_openpty) {
+		dyn_openpty = r_lib_dl_sym (NULL, "openpty");
+	}
+	if (!dyn_login_tty) {
+		dyn_openpty = r_lib_dl_sym (NULL, "login_tty");
+	}
+	if (!dyn_forkpty) {
+		dyn_openpty = r_lib_dl_sym (NULL, "forkpty");
+	}
+}
+
 #endif
 
 R_API RRunProfile *r_run_new(const char *str) {
 	RRunProfile *p = R_NEW0 (RRunProfile);
 	if (p) {
 		r_run_reset (p);
-		r_run_parsefile (p, str);
+		if (str) {
+			r_run_parsefile (p, str);
+		}
 	}
 	return p;
 }
 
 R_API void r_run_reset(RRunProfile *p) {
+	r_return_if_fail (p);
 	memset (p, 0, sizeof (RRunProfile));
 	p->_aslr = -1;
 }
 
 R_API bool r_run_parse(RRunProfile *pf, const char *profile) {
-	if (!pf || !profile) {
-		return false;
-	}
+	r_return_val_if_fail (pf && profile, false);
 	char *p, *o, *str = strdup (profile);
 	if (!str) {
 		return false;
 	}
 	r_str_replace_char (str, '\r',0);
-	for (p = str; (o = strchr (p, '\n')); p = o) {
-		*o++ = 0;
+	p = str;
+	while (p) {
+		if ((o = strchr (p, '\n'))) {
+			*o++ = 0;
+		}
 		r_run_parseline (pf, p);
+		p = o;
 	}
 	free (str);
 	return true;
 }
 
-R_API void r_run_free (RRunProfile *r) {
-	free (r->_system);
-	free (r->_program);
-	free (r->_runlib);
-	free (r->_runlib_fcn);
-	free (r->_stdio);
-	free (r->_stdin);
-	free (r->_stdout);
-	free (r->_stderr);
-	free (r->_chgdir);
-	free (r->_chroot);
-	free (r->_libpath);
-	free (r->_preload);
-	free (r);
+R_API void r_run_free(RRunProfile *r) {
+	if (r) {
+		free (r->_system);
+		free (r->_program);
+		free (r->_runlib);
+		free (r->_runlib_fcn);
+		free (r->_stdio);
+		free (r->_stdin);
+		free (r->_stdout);
+		free (r->_stderr);
+		free (r->_chgdir);
+		free (r->_chroot);
+		free (r->_libpath);
+		free (r->_preload);
+		free (r);
+	}
 }
 
 #if __UNIX__
@@ -162,15 +188,16 @@ static char *getstr(const char *src) {
 		{
 			char *pat = strchr (src + 1, '@');
 			if (pat) {
-				int i, len, rep;
+				size_t len;
+				long i, rep;
 				*pat++ = 0;
-				rep = atoi (src + 1);
+				rep = strtol (src + 1, NULL, 10);
 				len = strlen (pat);
 				if (rep > 0) {
 					char *buf = malloc (rep);
 					if (buf) {
 						for (i = 0; i < rep; i++) {
-							buf[i] = pat[i%len];
+							buf[i] = pat[i % len];
 						}
 					}
 					return buf;
@@ -214,11 +241,6 @@ static char *getstr(const char *src) {
 		eprintf ("Invalid hexpair string\n");
 		free (ret);
 		return NULL;
-#if 0
-	// what is this for??
-	case '%':
-		return (char *) strtoul (src + 1, NULL, 0);
-#endif
 	}
 	r_str_unescape ((ret = strdup (src)));
 	return ret;
@@ -277,6 +299,10 @@ static void restore_saved_fd(int saved, bool restore, int fd) {
 
 static int handle_redirection_proc(const char *cmd, bool in, bool out, bool err) {
 #if HAVE_PTY
+	if (!dyn_forkpty) {
+		// No forkpty api found, maybe we should fallback to just fork without any pty allocated
+		return -1;
+	}
 	// use PTY to redirect I/O because pipes can be problematic in
 	// case of interactive programs.
 	int saved_stdin = dup (STDIN_FILENO);
@@ -284,11 +310,12 @@ static int handle_redirection_proc(const char *cmd, bool in, bool out, bool err)
 		return -1;
 	}
 	int saved_stdout = dup (STDOUT_FILENO);
-	if (saved_stdout== -1) {
+	if (saved_stdout == -1) {
 		close (saved_stdin);
 		return -1;
 	}
-	int fdm, pid = forkpty (&fdm, NULL, NULL, NULL);
+	
+	int fdm, pid = dyn_forkpty (&fdm, NULL, NULL, NULL);
 	if (pid == -1) {
 		close (saved_stdin);
 		close (saved_stdout);
@@ -356,15 +383,14 @@ static int handle_redirection_proc(const char *cmd, bool in, bool out, bool err)
 }
 
 static int handle_redirection(const char *cmd, bool in, bool out, bool err) {
-	if (!cmd || cmd[0] == '\0') {
-		return 0;
-	}
-
 #if __APPLE__ && !__POWERPC__
 	//XXX handle this in other layer since things changes a little bit
 	//this seems like a really good place to refactor stuff
 	return 0;
-#endif
+#else
+	if (!cmd || !*cmd) {
+		return 0;
+	}
 	if (cmd[0] == '"') {
 #if __UNIX__
 		if (in) {
@@ -394,7 +420,6 @@ static int handle_redirection(const char *cmd, bool in, bool out, bool err) {
 #warning quoted string redirection handle not yet done
 #endif
 #endif
-		return 0;
 	} else if (cmd[0] == '!') {
 		// redirection to a process
 		return handle_redirection_proc (cmd + 1, in, out, err);
@@ -425,21 +450,23 @@ static int handle_redirection(const char *cmd, bool in, bool out, bool err) {
 			DUP(2);
 		}
 		close (f);
-		return 0;
 	}
+	return 0;
+#endif
 }
 
-R_API int r_run_parsefile(RRunProfile *p, const char *b) {
+R_API bool r_run_parsefile(RRunProfile *p, const char *b) {
+	r_return_val_if_fail (p && b, false);
 	char *s = r_file_slurp (b, NULL);
 	if (s) {
-		int ret = r_run_parse (p, s);
+		bool ret = r_run_parse (p, s);
 		free (s);
 		return ret;
 	}
 	return 0;
 }
 
-R_API bool r_run_parseline(RRunProfile *p, char *b) {
+R_API bool r_run_parseline(RRunProfile *p, const char *b) {
 	int must_free = false;
 	char *e = strchr (b, '=');
 	if (!e || *b == '#') {
@@ -588,7 +615,7 @@ R_API bool r_run_parseline(RRunProfile *p, char *b) {
 	return true;
 }
 
-R_API const char *r_run_help() {
+R_API const char *r_run_help(void) {
 	return
 	"program=/bin/ls\n"
 	"arg1=/bin\n"
@@ -685,7 +712,7 @@ static int redirect_socket_to_pty(RSocket *sock) {
 	// in case of interactive applications
 	int fdm, fds;
 
-	if (openpty (&fdm, &fds, NULL, NULL, NULL) == -1) {
+	if (dyn_openpty && dyn_openpty (&fdm, &fds, NULL, NULL, NULL) == -1) {
 		perror ("opening pty");
 		return -1;
 	}
@@ -739,7 +766,9 @@ static int redirect_socket_to_pty(RSocket *sock) {
 
 	// parent
 	r_socket_close_fd (sock);
-	login_tty (fds);
+	if (dyn_login_tty) {
+		dyn_login_tty (fds);
+	}
 	close (fdm);
 
 	// disable the echo on slave stdin
@@ -757,6 +786,10 @@ static int redirect_socket_to_pty(RSocket *sock) {
 
 R_API int r_run_config_env(RRunProfile *p) {
 	int ret;
+
+#if HAVE_PTY
+	dyn_init ();
+#endif
 
 	if (!p->_program && !p->_system && !p->_runlib) {
 		printf ("No program, system or runlib rule defined\n");
@@ -1020,6 +1053,7 @@ R_API int r_run_config_env(RRunProfile *p) {
 	return 0;
 }
 
+// NOTE: return value is like in unix return code (0 = ok, 1 = not ok)
 R_API int r_run_start(RRunProfile *p) {
 #if LIBC_HAVE_FORK
 	if (p->_execve) {
@@ -1094,7 +1128,7 @@ R_API int r_run_start(RRunProfile *p) {
 #if __UNIX__
 		// XXX HACK close all non-tty fds
 		{ int i;
-			for (i = 3; i < 10; i++) {
+			for (i = 3; i < 1024; i++) {
 				close (i);
 			}
 		}

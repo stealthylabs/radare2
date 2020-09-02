@@ -73,7 +73,7 @@ R_API void r_bin_java_fmtype_free(void /*RBinJavaField*/ *fm_type);
 R_API RBinJavaAttrInfo *r_bin_java_read_next_attr(RBinJavaObj *bin, const ut64 offset, const ut8 *buf, const ut64 len);
 R_API RBinJavaCPTypeObj *r_bin_java_read_next_constant_pool_item(RBinJavaObj *bin, const ut64 offset, const ut8 *buf, ut64 len);
 R_API RBinJavaAttrMetas *r_bin_java_get_attr_type_by_name(const char *name);
-R_API RBinJavaCPTypeObj *r_bin_java_get_java_null_cp();
+R_API RBinJavaCPTypeObj *r_bin_java_get_java_null_cp(void);
 R_API ut64 r_bin_java_read_class_file2(RBinJavaObj *bin, const ut64 offset, const ut8 *buf, ut64 len);
 R_API RBinJavaAttrInfo *r_bin_java_get_attr_from_field(RBinJavaField *field, R_BIN_JAVA_ATTR_TYPE attr_type, ut32 pos);
 R_API RBinJavaField *r_bin_java_read_next_field(RBinJavaObj *bin, const ut64 offset, const ut8 *buffer, const ut64 len);
@@ -249,7 +249,7 @@ R_API ut64 r_bin_java_do_nothing_calc_size(RBinJavaCPTypeObj *obj);
 R_API ut64 r_bin_java_methodhandle_cp_calc_size(RBinJavaCPTypeObj *obj);
 R_API ut64 r_bin_java_methodtype_cp_calc_size(RBinJavaCPTypeObj *obj);
 R_API ut64 r_bin_java_invokedynamic_cp_calc_size(RBinJavaCPTypeObj *obj);
-R_API RBinJavaStackMapFrame *r_bin_java_default_stack_frame();
+R_API RBinJavaStackMapFrame *r_bin_java_default_stack_frame(void);
 
 R_API RList *r_bin_java_find_cp_const_by_val_float(RBinJavaObj *bin_obj, const ut8 *bytes, ut32 len);
 R_API RList *r_bin_java_find_cp_const_by_val_double(RBinJavaObj *bin_obj, const ut8 *bytes, ut32 len);
@@ -955,7 +955,8 @@ R_API char *get_type_value_str(const char *arg_str, ut8 array_cnt) {
 	char *str = malloc (str_len + 1);
 	ut32 bytes_written = snprintf (str, str_len + 1, "%s", arg_str);
 	while (array_cnt > 0) {
-		bytes_written = snprintf (str + bytes_written, str_len - bytes_written, "[]");
+		strcpy (str + bytes_written, "[]");
+		bytes_written += 2;
 		array_cnt--;
 	}
 	return str;
@@ -1240,7 +1241,7 @@ R_API char *r_bin_java_build_obj_key(RBinJavaObj *bin) {
 	return jvcname;
 }
 
-R_API int sdb_iterate_build_list(void *user, const char *k, const char *v) {
+R_API bool sdb_iterate_build_list(void *user, const char *k, const char *v) {
 	RList *bin_objs_list = (RList *) user;
 	size_t value = (size_t) sdb_atoi (v);
 	RBinJavaObj *bin_obj = NULL;
@@ -1252,7 +1253,7 @@ R_API int sdb_iterate_build_list(void *user, const char *k, const char *v) {
 	return true;
 }
 
-R_API RBinJavaCPTypeObj *r_bin_java_get_java_null_cp() {
+R_API RBinJavaCPTypeObj *r_bin_java_get_java_null_cp(void) {
 	if (R_BIN_JAVA_NULL_TYPE_INITTED) {
 		return &R_BIN_JAVA_NULL_TYPE;
 	}
@@ -2508,7 +2509,7 @@ R_API ut64 r_bin_java_get_method_code_offset(RBinJavaField *fm_type) {
 	return offset;
 }
 
-R_API RBinField *r_bin_java_allocate_rbinfield() {
+R_API RBinField *r_bin_java_allocate_rbinfield(void) {
 	RBinField *t = (RBinField *) malloc (sizeof (RBinField));
 	if (t) {
 		memset (t, 0, sizeof (RBinField));
@@ -4372,8 +4373,8 @@ R_API RBinJavaStackMapFrame *r_bin_java_stack_map_frame_new(ut8 *buffer, ut64 sz
 		IFDBG eprintf("r_bin_java_stack_map_frame_new: Parsing R_BIN_JAVA_STACK_FRAME_APPEND.\n");
 		// 1. Calculate the max index we want to copy from the list of the
 		// previous frames locals
-		ut16 k = stack_frame->tag - 251,
-		i = 0;
+		ut16 k = stack_frame->tag - 251;
+		ut32 i = 0;
 		// 2. Read the uoffset
 		stack_frame->offset_delta = R_BIN_JAVA_USHORT (buffer, offset);
 		offset += 2;
@@ -4475,7 +4476,7 @@ R_API ut16 r_bin_java_find_cp_class_ref_from_name_idx(RBinJavaObj *bin, ut16 nam
 	return (pos != len) ? pos : 0;
 }
 
-R_API RBinJavaStackMapFrame *r_bin_java_default_stack_frame() {
+R_API RBinJavaStackMapFrame *r_bin_java_default_stack_frame(void) {
 	RBinJavaStackMapFrame *sf = R_NEW0 (RBinJavaStackMapFrame);
 	if (!sf) {
 		return NULL;
@@ -8280,15 +8281,15 @@ R_API ut16 r_bin_java_calculate_method_access_value(const char *access_flags_str
 	return calculate_access_value (access_flags_str, METHOD_ACCESS_FLAGS);
 }
 
-R_API RList *retrieve_all_method_access_string_and_value() {
+R_API RList *retrieve_all_method_access_string_and_value(void) {
 	return retrieve_all_access_string_and_value (METHOD_ACCESS_FLAGS);
 }
 
-R_API RList *retrieve_all_field_access_string_and_value() {
+R_API RList *retrieve_all_field_access_string_and_value(void) {
 	return retrieve_all_access_string_and_value (FIELD_ACCESS_FLAGS);
 }
 
-R_API RList *retrieve_all_class_access_string_and_value() {
+R_API RList *retrieve_all_class_access_string_and_value(void) {
 	return retrieve_all_access_string_and_value (CLASS_ACCESS_FLAGS);
 }
 
@@ -9085,7 +9086,7 @@ R_API ut8 *U(r_bin_java_cp_get_field_ref)(RBinJavaObj * bin, ut32 * out_sz, ut16
 	return r_bin_java_cp_get_fm_ref (bin, out_sz, R_BIN_JAVA_CP_FIELDREF, class_idx, name_and_type_idx);
 }
 
-R_API void U(deinit_java_type_null)() {
+R_API void U(deinit_java_type_null)(void) {
 	free (R_BIN_JAVA_NULL_TYPE.metas);
 }
 

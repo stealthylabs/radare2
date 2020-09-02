@@ -11,10 +11,11 @@
 
 | Service | Badge |
 |----------|---------------------------------------------------------------------|
+| **GithubCI**  | [![Tests Status](https://github.com/radareorg/radare2/workflows/Radare2%20CI/badge.svg)](https://github.com/radareorg/radare2/actions?query=workflow%3A%22Radare2+CI%22)|
 | **TravisCI** 	| [![Build Status](https://travis-ci.com/radareorg/radare2.svg?branch=master)](https://travis-ci.com/radareorg/radare2)|
 | **AppVeyor**  | [![Build status](https://ci.appveyor.com/api/projects/status/9cgkgxkc3203fm1o/branch/master?svg=true)](https://ci.appveyor.com/project/radareorg/radare2/branch/master)|
-| **FreeBSD (sr.ht)**  | [![builds.sr.ht status](https://builds.sr.ht/~xvilka/radare2/freebsd.yml.svg)](https://builds.sr.ht/~xvilka/radare2/freebsd.yml?)|
-| **OpenBSD (sr.ht)**  | [![builds.sr.ht status](https://builds.sr.ht/~xvilka/radare2/openbsd.yml.svg)](https://builds.sr.ht/~xvilka/radare2/openbsd.yml?)|
+| **FreeBSD (sr.ht)**  | [![builds.sr.ht status](https://builds.sr.ht/~xvilka/radare2/commits/freebsd.yml.svg)](https://builds.sr.ht/~xvilka/radare2/commits/freebsd.yml?)|
+| **OpenBSD (sr.ht)**  | [![builds.sr.ht status](https://builds.sr.ht/~xvilka/radare2/commits/openbsd.yml.svg)](https://builds.sr.ht/~xvilka/radare2/commits/openbsd.yml?)|
 | **Coverity** 	| [![Build Status](https://scan.coverity.com/projects/416/badge.svg)](https://scan.coverity.com/projects/416) |
 | **LGTM** | [![Total alerts](https://img.shields.io/lgtm/alerts/g/radareorg/radare2.svg?logo=lgtm&logoWidth=18)](https://lgtm.com/projects/g/radareorg/radare2/alerts/)
 | **Infrastructure** |  [![CII Best Practices](https://bestpractices.coreinfrastructure.org/projects/741/badge)](https://bestpractices.coreinfrastructure.org/projects/741) |
@@ -36,14 +37,14 @@ code, debugging programs, attaching to remote gdb servers...
 
 radare2 is portable.
 
-To learn more on radare2 you may want to read the [official radare2 book](https://radare.gitbooks.io/radare2book/content/).
+To learn more on radare2 you may want to read the [official radare2 book](https://book.rada.re).
 
 You can also use [r2lrn](https://github.com/0ki/r2lrn) or r2golf for a hands-on learning experience.
 
 ## Operating Systems
 
-Windows (since XP), GNU/Linux, OS X, [Net|Free|Open]BSD,
-Android, iOS, OSX, QNX, Solaris, Haiku, Firefox OS.
+Windows (since XP), GNU/Linux, GNU/Darwin, GNU/Hurd, Apple's {Mac,i,iPad,watch}OS,
+[Dragonfly|Net|Free|Open]BSD, Android, QNX, Solaris, Haiku, FirefoxOS.
 
 ## Architectures
 
@@ -128,7 +129,7 @@ Look at [CONTRIBUTING.md](https://github.com/radareorg/radare2/blob/master/CONTR
 
 ## Tests
 
-Running `make tests` will fetch the test binaries 
+Running `make tests` will fetch the test binaries
 repository and run all the tests in order to verify that no changes break any functionality.
 
 We run those tests on every commit, and they are also executed with ASAN
@@ -144,5 +145,3 @@ Telegram: [https://t.me/radare](https://t.me/radare)
 Twitter: [@radareorg](https://twitter.com/radareorg)
 
 IRC: irc.freenode.net #radare
-
-Matrix: @radare2:matrix.org

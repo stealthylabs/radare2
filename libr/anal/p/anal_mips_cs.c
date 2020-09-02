@@ -5,6 +5,7 @@
 #include <capstone/capstone.h>
 #include <capstone/mips.h>
 
+static ut64 t9_pre = UT64_MAX;
 // http://www.mrc.uidaho.edu/mrc/people/jff/digital/MIPSir.html
 
 #define OPERAND(x) insn->detail->mips.operands[x]
@@ -408,6 +409,7 @@ static int analop_esil(RAnal *a, RAnalOp *op, ut64 addr, const ut8 *buf, int len
 	case MIPS_INS_DADD:
 	case MIPS_INS_DADDI:
 	/** unsigned */
+	case MIPS_INS_DADDU:
 	case MIPS_INS_ADDU:
 	case MIPS_INS_ADDIU:
 	case MIPS_INS_DADDIU:
@@ -731,8 +733,6 @@ static int analop(RAnal *anal, RAnalOp *op, ut64 addr, const ut8 *buf, int len, 
 		obits = anal->bits;
 	}
 // XXX no arch->cpu ?!?! CS_MODE_MICRO, N64
-	op->delay = 0;
-	op->type = R_ANAL_OP_TYPE_ILL;
 	op->addr = addr;
 	if (len < 4) {
 		return -1;
@@ -758,12 +758,9 @@ static int analop(RAnal *anal, RAnalOp *op, ut64 addr, const ut8 *buf, int len, 
 			insn->op_str[0]?" ":"",
 			insn->op_str);
 	}
-	op->type = R_ANAL_OP_TYPE_NULL;
-	op->delay = 0;
-	op->jump = UT64_MAX;
-	op->fail = UT64_MAX;
 	op->id = insn->id;
 	opsize = op->size = insn->size;
+	op->refptr = 0;
 	switch (insn->id) {
 	case MIPS_INS_INVALID:
 		op->type = R_ANAL_OP_TYPE_ILL;
@@ -771,12 +768,18 @@ static int analop(RAnal *anal, RAnalOp *op, ut64 addr, const ut8 *buf, int len, 
 	case MIPS_INS_LB:
 	case MIPS_INS_LBU:
 	case MIPS_INS_LBUX:
+		op->refptr = 1;
+		 /* fallthrough */ 
 	case MIPS_INS_LW:
 	case MIPS_INS_LWC1:
 	case MIPS_INS_LWC2:
 	case MIPS_INS_LWL:
 	case MIPS_INS_LWR:
 	case MIPS_INS_LWXC1:
+		if (!op->refptr) {
+			op->refptr = 4;
+		}
+		 /* fallthrough */ 
 	case MIPS_INS_LD:
 	case MIPS_INS_LDC1:
 	case MIPS_INS_LDC2:
@@ -784,12 +787,18 @@ static int analop(RAnal *anal, RAnalOp *op, ut64 addr, const ut8 *buf, int len, 
 	case MIPS_INS_LDR:
 	case MIPS_INS_LDXC1:
 		op->type = R_ANAL_OP_TYPE_LOAD;
-		op->refptr = 4;
+		if (!op->refptr) {
+			op->refptr = 8;
+		}
 		switch (OPERAND(1).type) {
 		case MIPS_OP_MEM:
 			if (OPERAND(1).mem.base == MIPS_REG_GP) {
 				op->ptr = anal->gp + OPERAND(1).mem.disp;
-				op->refptr = 4;
+				if (REGID(0) == MIPS_REG_T9) {
+						t9_pre = op->ptr;
+				}
+			} else if (REGID(0) == MIPS_REG_T9) {
+						t9_pre = UT64_MAX;
 			}
 			break;
 		case MIPS_OP_IMM:
@@ -826,6 +835,11 @@ static int analop(RAnal *anal, RAnalOp *op, ut64 addr, const ut8 *buf, int len, 
 	case MIPS_INS_JALR:
 		op->type = R_ANAL_OP_TYPE_UCALL;
 		op->delay = 1;
+		if (REGID(0) == MIPS_REG_25) {
+			op->jump = t9_pre;
+			t9_pre = UT64_MAX;
+			op->type = R_ANAL_OP_TYPE_RCALL;
+		} 
 		break;
 	case MIPS_INS_JAL:
 	case MIPS_INS_JALS:
@@ -881,6 +895,9 @@ static int analop(RAnal *anal, RAnalOp *op, ut64 addr, const ut8 *buf, int len, 
 		SET_VAL (op, 2);
 		op->sign = (insn->id == MIPS_INS_ADDI || insn->id == MIPS_INS_ADD);
 		op->type = R_ANAL_OP_TYPE_ADD;
+		if (REGID(0) == MIPS_REG_T9) {
+				t9_pre += IMM(2);
+		} 
 		if (REGID(0) == MIPS_REG_SP) {
 			op->stackop = R_ANAL_STACK_INC;
 			op->stackptr = -IMM(2);
@@ -1010,7 +1027,13 @@ static int analop(RAnal *anal, RAnalOp *op, ut64 addr, const ut8 *buf, int len, 
 		// register is $ra, so jmp is a return
 		if (insn->detail->mips.operands[0].reg == MIPS_REG_RA) {
 			op->type = R_ANAL_OP_TYPE_RET;
+			t9_pre = UT64_MAX;
 		}
+		if (REGID(0) == MIPS_REG_25) {
+				op->jump = t9_pre;
+				t9_pre = UT64_MAX;
+		}
+
 		break;
 	case MIPS_INS_SLT:
 	case MIPS_INS_SLTI:

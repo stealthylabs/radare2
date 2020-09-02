@@ -71,16 +71,19 @@ static inline RDebugMap *add_map_reg(RList *list, const char *name, MEMORY_BASIC
 }
 
 R_API RList *r_w32_dbg_modules(RDebug *dbg) {
-	if (dbg->main_pid == -1) {
+	if (dbg->pid == -1) {
 		return NULL;
 	}
 	MODULEENTRY32 me;
-	RList *list = r_list_newf (free);
+	RList *list = r_list_newf ((RListFree)r_debug_map_free);
 	DWORD flags = TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32;
 	HANDLE h_mod_snap = w32_CreateToolhelp32Snapshot (flags, dbg->pid);
 
 	if (h_mod_snap == INVALID_HANDLE_VALUE) {
-		r_sys_perror ("r_w32_dbg_modules/CreateToolhelp32Snapshot");
+		// Suppress if process is still initializing
+		if (GetLastError () != ERROR_PARTIAL_COPY || r_list_length (dbg->threads) > 1) {
+			r_sys_perror ("r_w32_dbg_modules/CreateToolhelp32Snapshot");
+		}
 		goto err_w32_dbg_modules;
 	}
 	me.dwSize = sizeof (MODULEENTRY32);
@@ -101,7 +104,7 @@ R_API RList *r_w32_dbg_modules(RDebug *dbg) {
 		}
 	} while (Module32Next (h_mod_snap, &me));
 err_w32_dbg_modules:
-	if (h_mod_snap) {
+	if (h_mod_snap && h_mod_snap != INVALID_HANDLE_VALUE) {
 		CloseHandle (h_mod_snap);
 	}
 	return list;
@@ -198,7 +201,7 @@ static void proc_mem_img(HANDLE h_proc, RList *map_list, RList *mod_list, RWinMo
 				sect_found = 2;
 			}
 			if (sect_found) {
-				char *map_name = r_str_newf ("%s | %s", mod->map->name, sect_hdr->Name);
+				char *map_name = r_str_newf ("%s | %.8s", mod->map->name, sect_hdr->Name);
 				if (!map_name) {
 					perror ("r_str_newf");
 					return;
@@ -245,8 +248,8 @@ R_API RList *r_w32_dbg_maps(RDebug *dbg) {
 	LPVOID cur_addr;
 	MEMORY_BASIC_INFORMATION mbi;
 	RWinModInfo mod_inf = {0};
-	RList *map_list = r_list_new (), *mod_list = NULL;
-	RIOW32Dbg *rio = dbg->user;
+	RList *map_list = r_list_newf ((RListFree)r_debug_map_free), *mod_list = NULL;
+	W32DbgWInst *wrap = dbg->user;
 
 	GetSystemInfo (&si);
 	cur_addr = si.lpMinimumApplicationAddress;
@@ -254,14 +257,14 @@ R_API RList *r_w32_dbg_maps(RDebug *dbg) {
 	mod_list = r_w32_dbg_modules (dbg);
 	/* process memory map */
 	while (cur_addr < si.lpMaximumApplicationAddress &&
-		VirtualQueryEx (rio->pi.hProcess, cur_addr, &mbi, sizeof (mbi)) != 0) {
+		VirtualQueryEx (wrap->pi.hProcess, cur_addr, &mbi, sizeof (mbi)) != 0) {
 		if (mbi.State != MEM_FREE) {
 			switch (mbi.Type) {
 			case MEM_IMAGE:
-				proc_mem_img (rio->pi.hProcess, map_list, mod_list, &mod_inf, &si, &mbi);
+				proc_mem_img (wrap->pi.hProcess, map_list, mod_list, &mod_inf, &si, &mbi);
 				break;
 			case MEM_MAPPED:
-				proc_mem_map (rio->pi.hProcess, map_list, &mbi);
+				proc_mem_map (wrap->pi.hProcess, map_list, &mbi);
 				break;
 			default:
 				add_map_reg (map_list, "", &mbi);

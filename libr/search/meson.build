@@ -2,12 +2,10 @@ r_search_sources = [
   'aes-find.c',
   'bytepat.c',
   'keyword.c',
-  # 'old_xrefs.c',
   'regexp.c',
   'privkey-find.c',
   'search.c',
-  'strings.c',
-  'xrefs.c',
+  'strings.c'
 ]
 
 r_search = library('r_search', r_search_sources,
@@ -27,6 +25,7 @@ pkgconfig_mod.generate(r_search,
   version: r2_version,
   name: 'r_search',
   filebase: 'r_search',
+  libraries: pkgcfg_sanitize_libs,
   requires: [
     'r_util'
   ],

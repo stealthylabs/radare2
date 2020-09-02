@@ -1,4 +1,4 @@
-/* radare - LGPL - Copyright 2007-2019 - pancake */
+/* radare - LGPL - Copyright 2007-2020 - pancake */
 /* dietline is a lightweight and portable library similar to GNU readline */
 
 #include <r_cons.h>
@@ -46,7 +46,7 @@ static inline bool is_word_break_char(char ch, bool mode) {
 }
 
 /* https://www.gnu.org/software/bash/manual/html_node/Commands-For-Killing.html */
-static void backward_kill_word() {
+static void backward_kill_word(void) {
 	int i, len;
 	if (I.buffer.index > 0) {
 		for (i = I.buffer.index; i > 0 && is_word_break_char (I.buffer.data[i], MINOR_BREAK); i--) {
@@ -74,7 +74,7 @@ static void backward_kill_word() {
 	}
 }
 
-static void backward_kill_Word() {
+static void backward_kill_Word(void) {
 	int i, len;
 	if (I.buffer.index > 0) {
 		for (i = I.buffer.index; i > 0 && is_word_break_char (I.buffer.data[i], MAJOR_BREAK); i--) {
@@ -102,7 +102,7 @@ static void backward_kill_Word() {
 	}
 }
 
-static void kill_word() {
+static void kill_word(void) {
 	int i, len;
 	for (i = I.buffer.index; i < I.buffer.length && is_word_break_char (I.buffer.data[i], MINOR_BREAK); i++) {
 		/* Move the cursor index forward until we hit a non-word-break-character */
@@ -121,7 +121,7 @@ static void kill_word() {
 	I.buffer.length = strlen (I.buffer.data);
 }
 
-static void kill_Word() {
+static void kill_Word(void) {
 	int i, len;
 	for (i = I.buffer.index; i < I.buffer.length && is_word_break_char (I.buffer.data[i], MAJOR_BREAK); i++) {
 		/* Move the cursor index forward until we hit a non-word-break-character */
@@ -140,7 +140,7 @@ static void kill_Word() {
 	I.buffer.length = strlen (I.buffer.data);
 }
 
-static void paste() {
+static void paste(void) {
 	if (I.clipboard) {
 		char *cursor = I.buffer.data + I.buffer.index;
 		int dist = (I.buffer.data + I.buffer.length) - cursor;
@@ -153,7 +153,7 @@ static void paste() {
 	}
 }
 
-static void unix_word_rubout() {
+static void unix_word_rubout(void) {
 	int i, len;
 	if (I.buffer.index > 0) {
 		for (i = I.buffer.index - 1; i > 0 && I.buffer.data[i] == ' '; i--) {
@@ -184,7 +184,7 @@ static void unix_word_rubout() {
 	}
 }
 
-static int inithist() {
+static int inithist(void) {
 	ZERO_FILL (I.history);
 	if ((I.history.size + 1024) * sizeof (char *) < I.history.size) {
 		return false;
@@ -198,7 +198,7 @@ static int inithist() {
 }
 
 /* initialize history stuff */
-R_API int r_line_dietline_init() {
+R_API int r_line_dietline_init(void) {
 	ZERO_FILL (I.completion);
 	if (!inithist ()) {
 		return false;
@@ -259,29 +259,35 @@ static int r_line_readchar_utf8(ut8 *s, int slen) {
 
 #if __WINDOWS__
 static int r_line_readchar_win(ut8 *s, int slen) { // this function handle the input in console mode
-	INPUT_RECORD irInBuf;
+	INPUT_RECORD irInBuf = { { 0 } };
 	BOOL ret, bCtrl = FALSE;
 	DWORD mode, out;
 	char buf[5] = {0};
 	HANDLE h;
 	void *bed;
 
+	h = GetStdHandle (STD_INPUT_HANDLE);
+	DWORD new_mode = I.vtmode == 2 ? ENABLE_VIRTUAL_TERMINAL_INPUT : 0;
+	GetConsoleMode (h, &mode);
+	SetConsoleMode (h, new_mode);
 	if (I.zerosep) {
 		bed = r_cons_sleep_begin ();
-		int rsz = read (0, s, 1);
+		DWORD rsz = 0;
+		BOOL ret = ReadFile (h, s, 1, &rsz, NULL);
 		r_cons_sleep_end (bed);
-		if (rsz != 1) {
+		SetConsoleMode (h, mode);
+		if (!ret || rsz != 1) {
 			return 0;
 		}
 		return 1;
 	}
-
-	h = GetStdHandle (STD_INPUT_HANDLE);
-	GetConsoleMode (h, &mode);
-	SetConsoleMode (h, 0);	// RAW
 do_it_again:
 	bed = r_cons_sleep_begin ();
-	ret = ReadConsoleInput (h, &irInBuf, 1, &out);
+	if (r_cons_singleton()->term_xterm) {
+		ret = ReadFile (h, buf, 1, &out, NULL);
+	} else {
+		ret = ReadConsoleInput (h, &irInBuf, 1, &out);
+	}
 	r_cons_sleep_end (bed);
 	if (ret < 1) {
 		return 0;
@@ -404,14 +410,14 @@ R_API int r_line_hist_add(const char *line) {
 	return true;
 }
 
-static int r_line_hist_up() {
+static int r_line_hist_up(void) {
 	if (!I.cb_history_up) {
 		r_line_set_hist_callback (&I, &r_line_hist_cmd_up, &r_line_hist_cmd_down);
 	}
 	return I.cb_history_up (&I);
 }
 
-static int r_line_hist_down() {
+static int r_line_hist_down(void) {
 	if (!I.cb_history_down) {
 		r_line_set_hist_callback (&I, &r_line_hist_cmd_up, &r_line_hist_cmd_down);
 	}
@@ -434,7 +440,7 @@ R_API const char *r_line_hist_get(int n) {
 	return NULL;
 }
 
-R_API int r_line_hist_list() {
+R_API int r_line_hist_list(void) {
 	int i = 0;
 	if (!I.history.data) {
 		inithist ();
@@ -448,7 +454,7 @@ R_API int r_line_hist_list() {
 	return i;
 }
 
-R_API void r_line_hist_free() {
+R_API void r_line_hist_free(void) {
 	int i;
 	if (I.history.data) {
 		for (i = 0; i < I.history.size; i++) {
@@ -521,7 +527,7 @@ R_API int r_line_hist_chop(const char *file, int limit) {
 	return 0;
 }
 
-static void selection_widget_draw() {
+static void selection_widget_draw(void) {
 	RCons *cons = r_cons_singleton ();
 	RSelWidget *sel_widget = I.sel_widget;
 	int y, pos_y, pos_x = r_str_ansi_len (I.prompt);
@@ -621,7 +627,7 @@ static void print_rline_task(void *core) {
 	r_cons_flush ();
 }
 
-static void selection_widget_erase() {
+static void selection_widget_erase(void) {
 	RSelWidget *sel_widget = I.sel_widget;
 	if (sel_widget) {
 		sel_widget->options_len = 0;
@@ -640,7 +646,7 @@ static void selection_widget_erase() {
 	}
 }
 
-static void selection_widget_select() {
+static void selection_widget_select(void) {
 	RSelWidget *sel_widget = I.sel_widget;
 	if (sel_widget && sel_widget->selection < sel_widget->options_len) {
 		char *sp = strchr (I.buffer.data, ' ');
@@ -659,7 +665,7 @@ static void selection_widget_select() {
 	}
 }
 
-static void selection_widget_update() {
+static void selection_widget_update(void) {
 	int argc = r_pvector_len (&I.completion.args);
 	const char **argv = (const char **)r_pvector_data (&I.completion.args);
 	if (argc == 0 || (argc == 1 && I.buffer.length >= strlen (argv[0]))) {
@@ -686,7 +692,7 @@ static void selection_widget_update() {
 	return;
 }
 
-R_API void r_line_autocomplete() {
+R_API void r_line_autocomplete(void) {
 	char *p;
 	const char **argv = NULL;
 	int argc = 0, i, j, plen, len = 0;
@@ -826,11 +832,11 @@ R_API void r_line_autocomplete() {
 	fflush (stdout);
 }
 
-R_API const char *r_line_readline() {
+R_API const char *r_line_readline(void) {
 	return r_line_readline_cb (NULL, NULL);
 }
 
-static inline void rotate_kill_ring() {
+static inline void rotate_kill_ring(void) {
 	if (enable_yank_pop) {
 		I.buffer.index -= strlen (r_list_get_n (I.kill_ring, I.kill_ring_ptr));
 		I.buffer.data[I.buffer.index] = 0;
@@ -843,7 +849,7 @@ static inline void rotate_kill_ring() {
 	}
 }
 
-static inline void __delete_next_char() {
+static inline void __delete_next_char(void) {
 	if (I.buffer.index < I.buffer.length) {
 		int len = r_str_utf8_charsize (I.buffer.data + I.buffer.index);
 		memmove (I.buffer.data + I.buffer.index,
@@ -853,10 +859,10 @@ static inline void __delete_next_char() {
 	}
 }
 
-static inline void __delete_prev_char() {
+static inline void __delete_prev_char(void) {
 	if (I.buffer.index < I.buffer.length) {
 		if (I.buffer.index > 0) {
-			int len = r_str_utf8_charsize_prev (I.buffer.data + I.buffer.index, I.buffer.index);
+			size_t len = r_str_utf8_charsize_prev (I.buffer.data + I.buffer.index, I.buffer.index);
 			I.buffer.index -= len;
 			memmove (I.buffer.data + I.buffer.index,
 				I.buffer.data + I.buffer.index + len,
@@ -876,13 +882,13 @@ static inline void __delete_prev_char() {
 	}
 }
 
-static inline void delete_till_end() {
+static inline void delete_till_end(void) {
 	I.buffer.data[I.buffer.index] = '\0';
 	I.buffer.length = I.buffer.index;
 	I.buffer.index = I.buffer.index > 0 ? I.buffer.index - 1 : 0;
 }
 
-static void __print_prompt() {
+static void __print_prompt(void) {
         RCons *cons = r_cons_singleton ();
 	int columns = r_cons_get_size (NULL) - 2;
 	int chars = R_MAX (1, strlen (I.buffer.data));
@@ -911,19 +917,19 @@ static void __print_prompt() {
 	fflush (stdout);
 }
 
-static inline void __move_cursor_right() {
+static inline void __move_cursor_right(void) {
 	I.buffer.index = I.buffer.index < I.buffer.length
 		? I.buffer.index + r_str_utf8_charsize (I.buffer.data + I.buffer.index)
 		: I.buffer.length;
 }
 
-static inline void __move_cursor_left() {
+static inline void __move_cursor_left(void) {
 	I.buffer.index = I.buffer.index
 		? I.buffer.index - r_str_utf8_charsize_prev (I.buffer.data + I.buffer.index, I.buffer.index)
 		: 0;
 }
 
-static inline void vi_cmd_b() {
+static inline void vi_cmd_b(void) {
 	int i;
 	for (i = I.buffer.index - 2; i >= 0; i--) {
 		if ((is_word_break_char (I.buffer.data[i], MINOR_BREAK)
@@ -939,7 +945,7 @@ static inline void vi_cmd_b() {
 	}
 }
 
-static inline void vi_cmd_B() {
+static inline void vi_cmd_B(void) {
 	int i;
 	for (i = I.buffer.index - 2; i >= 0; i--) {
 		if ((!is_word_break_char (I.buffer.data[i], MAJOR_BREAK)
@@ -953,7 +959,7 @@ static inline void vi_cmd_B() {
 	}
 }
 
-static inline void vi_cmd_W() {
+static inline void vi_cmd_W(void) {
 	int i;
 	for (i = I.buffer.index + 1; i < I.buffer.length; i++) {
 		if ((!is_word_break_char (I.buffer.data[i], MAJOR_BREAK)
@@ -967,7 +973,7 @@ static inline void vi_cmd_W() {
 	}
 }
 
-static inline void vi_cmd_w() {
+static inline void vi_cmd_w(void) {
 	int i;
 	for (i = I.buffer.index + 1; i < I.buffer.length; i++) {
 		if ((!is_word_break_char (I.buffer.data[i], MINOR_BREAK)
@@ -983,7 +989,7 @@ static inline void vi_cmd_w() {
 	}
 }
 
-static inline void vi_cmd_E() {
+static inline void vi_cmd_E(void) {
 	int i;
 	for (i = I.buffer.index + 1; i < I.buffer.length; i++) {
 		if ((!is_word_break_char (I.buffer.data[i], MAJOR_BREAK)
@@ -997,7 +1003,7 @@ static inline void vi_cmd_E() {
 	}
 }
 
-static inline void vi_cmd_e() {
+static inline void vi_cmd_e(void) {
 	int i;
 	for (i = I.buffer.index + 1; i < I.buffer.length; i++) {
 		if ((!is_word_break_char (I.buffer.data[i], MINOR_BREAK)
@@ -1013,7 +1019,7 @@ static inline void vi_cmd_e() {
 	}
 }
 
-static void __update_prompt_color () {
+static void __update_prompt_color (void) {
 	RCons *cons = r_cons_singleton ();
 	const char *BEGIN = "", *END = "";
 	if (cons->context->color_mode) {
@@ -1037,7 +1043,7 @@ static void __update_prompt_color () {
 	I.prompt = r_str_newf ("%s%s%s", BEGIN, prompt, END);
 }
 
-static void __vi_mode() {
+static void __vi_mode(void) {
 	char ch;
 	I.vi_mode = CONTROL_MODE;
 	__update_prompt_color ();
@@ -1233,7 +1239,7 @@ static void __vi_mode() {
 }
 
 R_API const char *r_line_readline_cb(RLineReadCallback cb, void *user) {
-	int rows, columns = r_cons_get_size (&rows) - 2;
+	int rows;
 	const char *gcomp_line = "";
 	static int gcomp_idx = 0;
 	static bool yank_flag = 0;
@@ -1242,7 +1248,7 @@ R_API const char *r_line_readline_cb(RLineReadCallback cb, void *user) {
 #if USE_UTF8
 	int utflen;
 #endif
-	int ch, key, i = 0;	/* grep completion */
+	int ch = 0, key, i = 0;	/* grep completion */
 	char *tmp_ed_cmd, prev = 0;
 	int prev_buflen = -1;
 	RCons *cons = r_cons_singleton ();
@@ -1322,18 +1328,7 @@ R_API const char *r_line_readline_cb(RLineReadCallback cb, void *user) {
 		if (I.echo) {
 			r_cons_clear_line (0);
 		}
-		if (columns < 1) {
-			columns = 40;
-		}
-#if __WINDOWS__
-		if (I.echo) {
-			printf ("\r%*c\r", columns, ' ');
-		}
-#else
-		if (I.echo) {
-			printf ("\r\x1b[2K\r");	// %*c\r", columns, ' ');
-		}
-#endif
+		(void)r_cons_get_size (&rows);
 		switch (*buf) {
 		case 0:	// control-space
 			/* ignore atm */
@@ -1530,12 +1525,16 @@ R_API const char *r_line_readline_cb(RLineReadCallback cb, void *user) {
 			break;
 		case 27: // esc-5b-41-00-00 alt/meta key
 #if __WINDOWS__
-			memmove (buf, buf + 1, strlen (buf));
-			if (!buf[0]) {
-				buf[0] = -1;
+			if (I.vtmode != 2) {
+				memmove (buf, buf + 1, strlen (buf));
+				if (!buf[0]) {
+					buf[0] = -1;
+				}
+			} else {
+#endif
+				buf[0] = r_cons_readchar_timeout (50);
+#if __WINDOWS__
 			}
-#else
-			buf[0] = r_cons_readchar_timeout (50);
 #endif
 			switch (buf[0]) {
 			case 127: // alt+bkspace
@@ -1590,29 +1589,29 @@ R_API const char *r_line_readline_cb(RLineReadCallback cb, void *user) {
 				}
 				break;
 			default:
-#if !__WINDOWS__
-				buf[1] = r_cons_readchar_timeout (50);
-				if (buf[1] == -1) {
-					r_cons_break_pop ();
-					return NULL;
+				if (I.vtmode == 2) {
+					buf[1] = r_cons_readchar_timeout (50);
+					if (buf[1] == -1) {
+						r_cons_break_pop ();
+						return NULL;
+					}
 				}
-#endif
 				if (buf[0] == 0x5b) {	// [
 					switch (buf[1]) {
-					case '3':	// supr
+					case '3': // supr
 						__delete_next_char ();
-#if !__WINDOWS__
-						buf[1] = r_cons_readchar ();
-						if (buf[1] == -1) {
-							r_cons_break_pop ();
-							return NULL;
+						if (I.vtmode == 2) {
+							buf[1] = r_cons_readchar ();
+							if (buf[1] == -1) {
+								r_cons_break_pop ();
+								return NULL;
+							}
 						}
-#endif
 						break;
 					case '5': // pag up
-#if !__WINDOWS__
-						buf[1] = r_cons_readchar ();
-#endif
+						if (I.vtmode == 2) {
+							buf[1] = r_cons_readchar ();
+						}
 						if (I.hud) {
 							I.hud->top_entry_n -= (rows - 1);
 							if (I.hud->top_entry_n < 0) {
@@ -1625,9 +1624,9 @@ R_API const char *r_line_readline_cb(RLineReadCallback cb, void *user) {
 						}
 						break;
 					case '6': // pag down
-#if !__WINDOWS__
-						buf[1] = r_cons_readchar ();
-#endif
+						if (I.vtmode == 2) {
+							buf[1] = r_cons_readchar ();
+						}
 						if (I.hud) {
 							I.hud->top_entry_n += (rows - 1);
 							if (I.hud->top_entry_n >= I.hud->current_entry_n) {
@@ -1693,18 +1692,21 @@ R_API const char *r_line_readline_cb(RLineReadCallback cb, void *user) {
 						__move_cursor_left ();
 						break;
 					case 0x31:	// control + arrow
-#if __WINDOWS__
-						ch = buf[2];
-#else
-						ch = r_cons_readchar ();
-						if (ch == 0x7e) {	// HOME in screen/tmux
-							// corresponding END is 0x34 below (the 0x7e is ignored there)
-							I.buffer.index = 0;
-							break;
+						if (I.vtmode == 2) {
+							ch = r_cons_readchar ();
+							if (ch == 0x7e) { // HOME in screen/tmux
+								// corresponding END is 0x34 below (the 0x7e is ignored there)
+								I.buffer.index = 0;
+								break;
+							}
+							r_cons_readchar ();
 						}
-						r_cons_readchar ();
-						int fkey = ch - '0';
+#if __WINDOWS__
+						else {
+							ch = buf[2];
+						}
 #endif
+						int fkey = ch - '0';
 						switch (ch) {
 						case 0x41:
 							// first
@@ -1739,15 +1741,11 @@ R_API const char *r_line_readline_cb(RLineReadCallback cb, void *user) {
 							}
 							break;
 						default:
-#if __WINDOWS__
-							// ...
-#else
-							{
+							if (I.vtmode == 2) {
 								if (I.cb_fkey) {
 									I.cb_fkey (I.user, fkey);
 								}
 							}
-#endif
 							break;
 						}
 						r_cons_set_raw (1);

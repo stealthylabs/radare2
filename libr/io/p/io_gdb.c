@@ -40,13 +40,12 @@ static int debug_gdb_write_at(const ut8 *buf, int sz, ut64 addr) {
 	size_max = desc->read_max;
 	packets = sz / size_max;
 	last = sz % size_max;
-	for (x = 0; x < packets; x++) {
-		gdbr_write_memory (desc, addr + x * size_max,
-			(const uint8_t*)(buf + x * size_max), size_max);
+	ut64 offset = 0;
+	for (x = 0; x < packets; x++, offset += size_max) {
+		gdbr_write_memory (desc, addr + offset, buf + offset, size_max);
 	}
 	if (last) {
-		gdbr_write_memory (desc, addr + x * size_max,
-			(buf + x * size_max), last);
+		gdbr_write_memory (desc, addr + offset, buf + offset, last);
 	}
 	return sz;
 }
@@ -204,7 +203,7 @@ static int __gettid(RIODesc *fd) {
 }
 
 extern int send_msg(libgdbr_t *g, const char *command);
-extern int read_packet(libgdbr_t *instance);
+extern int read_packet(libgdbr_t *instance, bool vcont);
 
 static char *__system(RIO *io, RIODesc *fd, const char *cmd) {
 	if (!desc) {
@@ -264,7 +263,7 @@ static char *__system(RIO *io, RIODesc *fd, const char *cmd) {
 	if (r_str_startswith (cmd, "pkt ")) {
 		gdbr_lock_enter (desc);
 		if (send_msg (desc, cmd + 4) >= 0) {
-			(void)read_packet (desc);
+			(void)read_packet (desc, false);
 			desc->data[desc->data_len] = '\0';
 			io->cb_printf ("reply:\n%s\n", desc->data);
 			if (!desc->no_ack) {
@@ -291,7 +290,7 @@ static char *__system(RIO *io, RIODesc *fd, const char *cmd) {
 		}
 		gdbr_lock_enter (desc);
 		if (send_msg (desc, "bs") >= 0) {
-			(void)read_packet (desc);
+			(void)read_packet (desc, false);
 			desc->data[desc->data_len] = '\0';
 			if (!desc->no_ack) {
 				eprintf ("[waiting for ack]\n");
@@ -314,7 +313,7 @@ static char *__system(RIO *io, RIODesc *fd, const char *cmd) {
 		}
 		gdbr_lock_enter (desc);
 		if (send_msg (desc, "bc") >= 0) {
-			(void)read_packet (desc);
+			(void)read_packet (desc, false);
 			desc->data[desc->data_len] = '\0';
 			if (!desc->no_ack) {
 				eprintf ("[waiting for ack]\n");

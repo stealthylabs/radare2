@@ -1,4 +1,4 @@
-/* radare2 - LGPL - Copyright 2009-2019 - pancake, nibble, dso */
+/* radare2 - LGPL - Copyright 2009-2020 - pancake, nibble, dso */
 
 #include <r_bin.h>
 #include <r_types.h>
@@ -142,6 +142,7 @@ R_API void r_bin_info_free(RBinInfo *rb) {
 	free (rb->machine);
 	free (rb->os);
 	free (rb->subsystem);
+	free (rb->default_cc);
 	free (rb->rpath);
 	free (rb->guid);
 	free (rb->debug_file_name);
@@ -280,6 +281,8 @@ R_API bool r_bin_open_buf(RBin *bin, RBuffer *buf, RBinOptions *opt) {
 		}
 	}
 	if (!bf) {
+		// Uncomment for this speedup: 20s vs 22s
+		// RBuffer *buf = r_buf_new_slurp (bin->file);
 		bf = r_bin_file_new_from_buffer (bin, bin->file, buf, bin->rawstr,
 			opt->baseaddr, opt->loadaddr, opt->fd, opt->pluginname);
 		if (!bf) {
@@ -463,6 +466,7 @@ R_API void r_bin_free(RBin *bin) {
 		bin->file = NULL;
 		free (bin->force);
 		free (bin->srcdir);
+		free (bin->strenc);
 		//r_bin_free_bin_files (bin);
 		r_list_free (bin->binfiles);
 		r_list_free (bin->binxtrs);
@@ -760,9 +764,6 @@ R_API RList *r_bin_reset_strings(RBin *bin) {
 		bf->o->strings = NULL;
 	}
 
-	if (bin->minstrlen <= 0) {
-		return NULL;
-	}
 	bf->rawstr = bin->rawstr;
 	RBinPlugin *plugin = r_bin_file_cur_plugin (bf);
 
@@ -828,7 +829,7 @@ R_API int r_bin_is_static(RBin *bin) {
 	return true;
 }
 
-R_API RBin *r_bin_new() {
+R_API RBin *r_bin_new(void) {
 	int i;
 	RBinXtrPlugin *static_xtr_plugin;
 	RBinLdrPlugin *static_ldr_plugin;
@@ -846,6 +847,7 @@ R_API RBin *r_bin_new() {
 	bin->plugins = r_list_newf ((RListFree)r_bin_plugin_free);
 	bin->minstrlen = 0;
 	bin->strpurge = NULL;
+	bin->strenc = NULL;
 	bin->want_dbginfo = true;
 	bin->cur = NULL;
 	bin->ids = r_id_storage_new (0, ST32_MAX);
@@ -994,7 +996,7 @@ R_API void r_bin_list_archs(RBin *bin, int mode) {
 
 	int i = 0;
 	char unk[128];
-	char archline[128];
+	char archline[256];
 	RBinFile *binfile = r_bin_cur (bin);
 	RTable *table = r_table_new ();
 	const char *name = binfile? binfile->file: NULL;
@@ -1038,7 +1040,8 @@ R_API void r_bin_list_archs(RBin *bin, int mode) {
 	ut64 obj_size = obj->obj_size;
 	const char *arch = info? info->arch: NULL;
 	const char *machine = info? info->machine: "unknown_machine";
-
+	const char *h_flag = info? info->head_flag: NULL;
+	char * str_fmt;
 	i++;
 	if (!arch) {
 		snprintf (unk, sizeof (unk), "unk_%d", i);
@@ -1058,13 +1061,18 @@ R_API void r_bin_list_archs(RBin *bin, int mode) {
 			pj_ki (pj, "bits", bits);
 			pj_kn (pj, "offset", boffset);
 			pj_kn (pj, "size", obj_size);
+			if (!strcmp (arch, "mips")) {
+				pj_ks (pj, "isa", h_flag);
+			}
 			if (machine) {
 				pj_ks (pj, "machine", machine);
 			}
 			pj_end (pj);
 			break;
 		default:
-			r_table_add_rowf (table, "nXnss", i, boffset, obj_size, sdb_fmt ("%s_%i", arch, bits), machine);
+			str_fmt = strcmp (h_flag, "unknown_flag")? sdb_fmt ("%s_%i %s", arch, bits, h_flag) \
+					  : sdb_fmt ("%s_%i", arch, bits);
+			r_table_add_rowf (table, "nXnss", i, boffset, obj_size, str_fmt , machine);
 			bin->cb_printf ("%s\n", r_table_tostring(table));
 		}
 		snprintf (archline, sizeof (archline) - 1,
@@ -1084,13 +1092,18 @@ R_API void r_bin_list_archs(RBin *bin, int mode) {
 				pj_ki (pj, "bits", bits);
 				pj_kn (pj, "offset", boffset);
 				pj_kn (pj, "size", obj_size);
+				if (!strcmp (arch, "mips")) {
+					pj_ks (pj, "isa", h_flag);
+				}
 				if (machine) {
 					pj_ks (pj, "machine", machine);
 				}
 				pj_end (pj);
 				break;
 			default:
-				r_table_add_rowf (table, "nsnss", i, sdb_fmt ("0x%08" PFMT64x , boffset), obj_size, sdb_fmt("%s_%i", arch, bits), "");
+				str_fmt = strcmp (h_flag, "unknown_flag")? sdb_fmt ("%s_%i %s", arch, bits, h_flag) \
+						  : sdb_fmt ("%s_%i", arch, bits);
+				r_table_add_rowf (table, "nsnss", i, sdb_fmt ("0x%08" PFMT64x , boffset), obj_size, str_fmt, "");
 				bin->cb_printf ("%s\n", r_table_tostring(table));
 			}
 			snprintf (archline, sizeof (archline),
