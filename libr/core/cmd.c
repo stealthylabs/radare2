@@ -23,6 +23,7 @@
 #include <sys/types.h>
 #include <ctype.h>
 #include <stdarg.h>
+#include "cmd_helps.h"
 #if __UNIX__
 #include <sys/utsname.h>
 #endif
@@ -96,6 +97,7 @@ static int bb_cmpaddr(const void *_a, const void *_b) {
 }
 
 static void cmd_debug_reg(RCore *core, const char *str);
+
 #include "cmd_quit.c"
 #include "cmd_hash.c"
 #include "cmd_debug.c"
@@ -266,6 +268,7 @@ static const char *help_msg_k[] = {
 static const char *help_msg_r[] = {
 	"Usage:", "r[+-][ size]", "Resize file",
 	"r", "", "display file size",
+	"rj", "", "display the file size in JSON format",
 	"r", " size", "expand or truncate file to given size",
 	"r-", "num", "remove num bytes, move following data down",
 	"r+", "num", "insert num bytes, move following data up",
@@ -333,6 +336,15 @@ static const char *help_msg_vertical_bar[] = {
 	"", "[cmd] |T", "use scr.tts to speak out the stdout",
 	"", "[cmd] | [program]", "pipe output of command to program",
 	"", "[cmd] |.", "alias for .[cmd]",
+	NULL
+};
+
+static const char *help_msg_v[] = {
+	"Usage:", "v[*i]", "",
+	"v", "", "open visual panels",
+	"v", " test", "load saved layout with name test",
+	"v=", " test", "save current layout with name test",
+	"vi", " test", "open the file test in 'cfg.editor'",
 	NULL
 };
 
@@ -789,10 +801,11 @@ static int cmd_rap(void *data, const char *input) {
 		eprintf ("TODO: list connections in json\n");
 		break;
 	case '!': // "=!"
-		if (input[1] == '=') {
-			// swap core->cmdremote = core->cmdremote? 0: 1;
-			core->cmdremote = input[2]? 1: 0;
-			r_cons_println (r_str_bool (core->cmdremote));
+		if (input[1] == 'q') {
+			R_FREE (core->cmdremote);
+		} else if (input[1] == '=') { // =!=0 or =!= for iosystem
+			R_FREE (core->cmdremote);
+			core->cmdremote = r_str_trim_dup (input + 2);
 		} else {
 			char *res = r_io_system (core->io, input + 1);
 			if (res) {
@@ -1435,8 +1448,8 @@ static int cmd_kuery(void *data, const char *input) {
 	const char *sp, *p = "[sdb]> ";
 	Sdb *s = core->sdb;
 
-	char *cur_pos, *cur_cmd, *next_cmd = NULL;
-	char *temp_pos, *temp_cmd, *temp_storage = NULL;
+	char *cur_pos = NULL, *cur_cmd = NULL, *next_cmd = NULL;
+	char *temp_pos = NULL, *temp_cmd = NULL, *temp_storage = NULL;
 
 	switch (input[0]) {
 
@@ -1461,7 +1474,6 @@ static int cmd_kuery(void *data, const char *input) {
 					break;
 			}
 			cur_cmd = r_str_ndup (out, cur_pos - out);
-
 			pj_s (pj, cur_cmd);
 
 			free (next_cmd);
@@ -1821,6 +1833,18 @@ static int cmd_resize(void *data, const char *input) {
 			}
 		}
 		return true;
+	case 'j': { // "rj"
+			PJ * pj = pj_new ();
+			pj_o (pj);
+			if (oldsize != -1) {
+				pj_kn (pj, "size", oldsize);
+			}
+			pj_end (pj);
+			char *s = pj_drain (pj);
+			r_cons_println (s);
+			free (s);
+			return true;
+		}
 	case 'h':
 		if (core->file) {
 			if (oldsize != -1) {
@@ -1881,10 +1905,7 @@ static int cmd_panels(void *data, const char *input) {
 		return false;
 	}
 	if (*input == '?') {
-		eprintf ("Usage: v[*i]\n");
-		eprintf ("v.test    # save current layout with name test\n");
-		eprintf ("v test    # load saved layout with name test\n");
-		eprintf ("vi ...    # launch 'cfg.editor'\n");
+		r_core_cmd_help (core, help_msg_v);
 		return false;
 	}
 	if (!r_cons_is_interactive ()) {
@@ -2225,8 +2246,7 @@ static int cmd_system(void *data, const char *input) {
 			r_cons_printf ("Usage: !=[!]  - enable/disable remote commands\n");
 		} else {
 			if (!r_sandbox_enable (0)) {
-				core->cmdremote = input[1]? 1: 0;
-				r_cons_println (r_str_bool (core->cmdremote));
+				R_FREE (core->cmdremote);
 			}
 		}
 		break;
@@ -4675,30 +4695,6 @@ DEFINE_IS_TS_FCN_AND_SYMBOL(concatenation)
 DEFINE_IS_TS_FCN_AND_SYMBOL(grep_specifier)
 DEFINE_IS_TS_FCN_AND_SYMBOL(commands)
 
-static RCmdStatus int2cmdstatus(int v) {
-	if (v == R_CORE_CMD_EXIT) {
-		return R_CMD_STATUS_EXIT;
-	} else if (v < 0) {
-		return R_CMD_STATUS_ERROR;
-	} else {
-		return R_CMD_STATUS_OK;
-	}
-}
-
-static int cmdstatus2int(RCmdStatus s) {
-	switch (s) {
-	case R_CMD_STATUS_OK:
-		return 0;
-	case R_CMD_STATUS_ERROR:
-	case R_CMD_STATUS_WRONG_ARGS:
-	case R_CMD_STATUS_INVALID:
-		return -1;
-	case R_CMD_STATUS_EXIT:
-	default:
-		return R_CORE_CMD_EXIT;
-	}
-}
-
 static struct tsr2cmd_edit *create_cmd_edit(struct tsr2cmd_state *state, TSNode arg, char *new_text) {
 	struct tsr2cmd_edit *e = R_NEW0 (struct tsr2cmd_edit);
 	ut32 command_start = ts_node_start_byte (state->substitute_cmd);
@@ -4839,28 +4835,42 @@ static void handle_substitution_args(struct tsr2cmd_state *state, TSNode args, R
 	}
 }
 
-static char *unescape_arg(struct tsr2cmd_state *state, TSNode arg, const char *special_chars) {
-	char *arg_str = ts_node_sub_string (arg, state->input);
+static char *unescape_arg_str(struct tsr2cmd_state *state, const char *arg_str, const char *special_chars) {
 	char *unescaped_arg = unescape_special_chars (arg_str, special_chars);
 	R_LOG_DEBUG ("original arg = '%s', unescaped arg = '%s'\n", arg_str, unescaped_arg);
+	return unescaped_arg;
+}
+
+static char *unescape_arg(struct tsr2cmd_state *state, TSNode arg, const char *special_chars) {
+	char *arg_str = ts_node_sub_string (arg, state->input);
+	char *unescaped_arg = unescape_arg_str (state, arg_str, special_chars);
 	free (arg_str);
 	return unescaped_arg;
 }
 
-static char *do_handle_ts_unescape_arg(struct tsr2cmd_state *state, TSNode arg) {
+static char *do_handle_ts_unescape_arg(struct tsr2cmd_state *state, TSNode arg, bool do_unwrap) {
 	if (is_ts_arg (arg)) {
-		return do_handle_ts_unescape_arg (state, ts_node_named_child (arg, 0));
+		return do_handle_ts_unescape_arg (state, ts_node_named_child (arg, 0), do_unwrap);
 	} else if (is_ts_arg_identifier (arg)) {
 		return unescape_arg (state, arg, SPECIAL_CHARS_REGULAR);
 	} else if (is_ts_single_quoted_arg (arg) || is_ts_double_quoted_arg (arg)) {
 		const char *special = is_ts_single_quoted_arg (arg)? SPECIAL_CHARS_SINGLE_QUOTED: SPECIAL_CHARS_DOUBLE_QUOTED;
-		return unescape_arg (state, arg, special);
+		char *o_arg_str = ts_node_sub_string (arg, state->input);
+		char *arg_str = o_arg_str;
+		if (do_unwrap) {
+			// remove quotes
+			arg_str[strlen (arg_str) - 1] = '\0';
+			arg_str++;
+		}
+		char *res = unescape_arg_str (state, arg_str, special);
+		free (o_arg_str);
+		return res;
 	} else if (is_ts_concatenation (arg)) {
 		uint32_t i, n_children = ts_node_named_child_count (arg);
 		RStrBuf *sb = r_strbuf_new (NULL);
 		for (i = 0; i < n_children; i++) {
 			TSNode sub_arg = ts_node_named_child (arg, i);
-			char *s = do_handle_ts_unescape_arg (state, sub_arg);
+			char *s = do_handle_ts_unescape_arg (state, sub_arg, do_unwrap);
 			r_strbuf_append (sb, s);
 		}
 		return r_strbuf_drain (sb);
@@ -4869,7 +4879,7 @@ static char *do_handle_ts_unescape_arg(struct tsr2cmd_state *state, TSNode arg) 
 	}
 }
 
-static RCmdParsedArgs *parse_args(struct tsr2cmd_state *state, TSNode args) {
+static RCmdParsedArgs *parse_args(struct tsr2cmd_state *state, TSNode args, bool do_unwrap) {
 	if (ts_node_is_null (args)) {
 		return r_cmd_parsed_args_newargs (0, NULL);
 	} else if (is_ts_args (args)) {
@@ -4878,7 +4888,7 @@ static RCmdParsedArgs *parse_args(struct tsr2cmd_state *state, TSNode args) {
 		char **unescaped_args = R_NEWS0 (char *, n_children);
 		for (i = 0; i < n_children; i++) {
 			TSNode arg = ts_node_named_child (args, i);
-			unescaped_args[i] = do_handle_ts_unescape_arg (state, arg);
+			unescaped_args[i] = do_handle_ts_unescape_arg (state, arg, do_unwrap);
 		}
 		RCmdParsedArgs *res = r_cmd_parsed_args_newargs (n_children, unescaped_args);
 		for (i = 0; i < n_children; i++) {
@@ -4887,7 +4897,7 @@ static RCmdParsedArgs *parse_args(struct tsr2cmd_state *state, TSNode args) {
 		free (unescaped_args);
 		return res;
 	} else {
-		char *unescaped_args[] = { do_handle_ts_unescape_arg (state, args) };
+		char *unescaped_args[] = { do_handle_ts_unescape_arg (state, args, do_unwrap) };
 		RCmdParsedArgs *res = r_cmd_parsed_args_newargs (1, unescaped_args);
 		free (unescaped_args[0]);
 		return res;
@@ -4956,7 +4966,7 @@ static bool substitute_args(struct tsr2cmd_state *state, TSNode args, TSNode *ne
 	return res;
 }
 
-static RCmdParsedArgs *ts_node_handle_arg_prargs(struct tsr2cmd_state *state, TSNode command, TSNode arg, uint32_t child_idx) {
+static RCmdParsedArgs *ts_node_handle_arg_prargs(struct tsr2cmd_state *state, TSNode command, TSNode arg, uint32_t child_idx, bool do_unwrap) {
 	RCmdParsedArgs *res = NULL;
 	TSNode new_command;
 	substitute_args_init (state, command);
@@ -4967,7 +4977,7 @@ static RCmdParsedArgs *ts_node_handle_arg_prargs(struct tsr2cmd_state *state, TS
 	}
 
 	arg = ts_node_named_child (new_command, child_idx);
-	res = parse_args (state, arg);
+	res = parse_args (state, arg, do_unwrap);
 	if (res == NULL) {
 		R_LOG_ERROR ("Cannot parse arg\n");
 		goto err;
@@ -4978,7 +4988,7 @@ err:
 }
 
 static char *ts_node_handle_arg(struct tsr2cmd_state *state, TSNode command, TSNode arg, uint32_t child_idx) {
-	RCmdParsedArgs *a = ts_node_handle_arg_prargs (state, command, arg, child_idx);
+	RCmdParsedArgs *a = ts_node_handle_arg_prargs (state, command, arg, child_idx, true);
 	char *str = r_cmd_parsed_args_argstr (a);
 	r_cmd_parsed_args_free (a);
 	return str;
@@ -5006,7 +5016,9 @@ DEFINE_HANDLE_TS_FCN_AND_SYMBOL(arged_command) {
 
 	RCmdParsedArgs *pr_args = NULL;
 	if (!ts_node_is_null (args)) {
-		pr_args = ts_node_handle_arg_prargs (state, node, args, 1);
+		RCmdDesc *cd = r_cmd_get_desc (state->core->rcmd, command_str);
+		bool do_unwrap = cd && cd->type != R_CMD_DESC_TYPE_OLDINPUT;
+		pr_args = ts_node_handle_arg_prargs (state, node, args, 1, do_unwrap);
 		if (!pr_args) {
 			goto err;
 		}
@@ -5041,7 +5053,7 @@ err:
 }
 
 DEFINE_HANDLE_TS_FCN_AND_SYMBOL(legacy_quoted_command) {
-	return int2cmdstatus(run_cmd_depth (state->core, node_string));
+	return r_cmd_int2status(run_cmd_depth (state->core, node_string));
 }
 
 DEFINE_HANDLE_TS_FCN_AND_SYMBOL(repeat_command) {
@@ -5056,7 +5068,7 @@ DEFINE_HANDLE_TS_FCN_AND_SYMBOL(repeat_command) {
 		return R_CMD_STATUS_INVALID;
 	}
 	if (rep > INTERACTIVE_MAX_REP && r_cons_is_interactive ()) {
-		if (!r_cons_yesno ('n', "Are you sure to repeat this %" PFMT64d " times? (y/N)", rep)) {
+		if (!r_cons_yesno ('n', "Are you sure to repeat this %d times? (y/N)", rep)) {
 			return R_CMD_STATUS_INVALID;
 		}
 	}
@@ -5195,7 +5207,9 @@ DEFINE_HANDLE_TS_FCN_AND_SYMBOL(help_command) {
 		RCmdParsedArgs *pr_args = NULL;
 		RCmdStatus res = R_CMD_STATUS_INVALID;
 		if (!ts_node_is_null (args)) {
-			pr_args = ts_node_handle_arg_prargs (state, node, args, 1);
+			RCmdDesc *cd = r_cmd_get_desc (state->core->rcmd, command_str);
+			bool do_unwrap = cd && cd->type != R_CMD_DESC_TYPE_OLDINPUT;
+			pr_args = ts_node_handle_arg_prargs (state, node, args, 1, do_unwrap);
 			if (!pr_args) {
 				goto err_else;
 			}
@@ -5731,7 +5745,7 @@ DEFINE_HANDLE_TS_FCN_AND_SYMBOL(iter_offsets_command) {
 	TSNode args = ts_node_named_child (node, 1);
 	ut64 orig_offset = core->offset;
 
-	RCmdParsedArgs *a = ts_node_handle_arg_prargs (state, node, args, 1);
+	RCmdParsedArgs *a = ts_node_handle_arg_prargs (state, node, args, 1, true);
 	if (!a) {
 		R_LOG_ERROR ("Cannot parse args\n");
 		return R_CMD_STATUS_INVALID;
@@ -5992,7 +6006,7 @@ DEFINE_HANDLE_TS_FCN_AND_SYMBOL(iter_interpret_command) {
 	}
 	TSNode args = ts_node_named_child (new_command, 1);
 
-	RCmdParsedArgs *a = parse_args (state, args);
+	RCmdParsedArgs *a = parse_args (state, args, true);
 	if (!a) {
 		r_list_free (edits);
 		substitute_args_fini (state);
@@ -6505,7 +6519,7 @@ DEFINE_HANDLE_TS_FCN_AND_SYMBOL(pipe_command) {
 	char *first_str = ts_node_sub_string (first_cmd, state->input);
 	char *second_str = ts_node_sub_string (second_cmd, state->input);
 	int value = state->core->num->value;
-	RCmdStatus res = int2cmdstatus (r_core_cmd_pipe (state->core, first_str, second_str));
+	RCmdStatus res = r_cmd_int2status (r_core_cmd_pipe (state->core, first_str, second_str));
 	state->core->num->value = value;
 	free (first_str);
 	free (second_str);
@@ -6734,7 +6748,7 @@ static int run_cmd_depth(RCore *core, char *cmd) {
 
 R_API int r_core_cmd(RCore *core, const char *cstr, int log) {
 	if (core->use_tree_sitter_r2cmd) {
-		return cmdstatus2int(core_cmd_tsr2cmd (core, cstr, false, log));
+		return r_cmd_status2int(core_cmd_tsr2cmd (core, cstr, false, log));
 	}
 
 	int ret = false, i;
@@ -6753,11 +6767,23 @@ R_API int r_core_cmd(RCore *core, const char *cstr, int log) {
 		}
 	}
 	if (core->cmdremote) {
-		if (*cstr != '=' && *cstr != 'q' && strncmp (cstr, "!=", 2)) {
-			char *res = r_io_system (core->io, cstr);
-			if (res) {
-				r_cons_printf ("%s\n", res);
-				free (res);
+		if (*cstr == 'q') {
+			R_FREE (core->cmdremote);
+			goto beach; // false
+		} else if (*cstr != '=' && strncmp (cstr, "!=", 2)) {
+			if (core->cmdremote[0]) {
+				char *s = r_str_newf ("%s %s", core->cmdremote, cstr);
+				r_core_rtr_cmd (core, s);
+				free (s);
+			} else {
+				char *res = r_io_system (core->io, cstr);
+				if (res) {
+					r_cons_printf ("%s\n", res);
+					free (res);
+				}
+			}
+			if (log) {
+				r_line_hist_add (cstr);
 			}
 			goto beach; // false
 		}
@@ -7081,56 +7107,60 @@ R_API void r_core_cmd_init(RCore *core) {
 		const char *description;
 		RCmdCb cb;
 		void (*descriptor_init)(RCore *core, RCmdDesc *parent);
+		const RCmdDescHelp *help;
+		const RCmdDescHelp *group_help;
+		RCmdDescType type;
+		RCmdArgvCb argv_cb;
 	} cmds[] = {
-		{"!",        "run system command", cmd_system},
-		{"_",        "print last output", cmd_last},
-		{"#",        "calculate hash", cmd_hash},
-		{"$",        "alias", cmd_alias},
-		{"%",        "short version of 'env' command", cmd_env},
-		{"&",        "tasks", cmd_tasks},
-		{"(",        "macro", cmd_macro, cmd_macro_init},
-		{"*",        "pointer read/write", cmd_pointer},
-		{"-",        "open cfg.editor and run script", cmd_stdin},
-		{".",        "interpret", cmd_interpret},
-		{"/",        "search kw, pattern aes", cmd_search, cmd_search_init},
-		{"=",        "io pipe", cmd_rap},
-		{"?",        "help message", cmd_help, cmd_help_init},
-		{"\\",       "alias for =!", cmd_rap_run},
-		{"'",        "alias for =!", cmd_rap_run},
-		{"0",       "alias for s 0x", cmd_ox},
-		{"a", "analysis", cmd_anal, cmd_anal_init},
-		{"b",    "change block size", cmd_bsize},
-		{"c",      "compare memory", cmd_cmp, cmd_cmp_init},
-		{"C",     "code metadata", cmd_meta, cmd_meta_init},
-		{"d",    "debugger operations", cmd_debug, cmd_debug_init},
-		{"e",     "evaluate configuration variable", cmd_eval, cmd_eval_init},
-		{"f",     "get/set flags", cmd_flag, cmd_flag_init},
-		{"g",        "egg manipulation", cmd_egg, cmd_egg_init},
-		{"i",     "get file info", cmd_info, cmd_info_init},
-		{"k",    "perform sdb query", cmd_kuery},
-		{"l",       "list files and directories", cmd_ls},
-		{"j",    "join the contents of the two files", cmd_join},
-		{"h",    "show the top n number of line in file", cmd_head},
-		{"L",        "manage dynamically loaded plugins", cmd_plugins},
-		{"m",    "mount filesystem", cmd_mount, cmd_mount_init},
-		{"o",     "open or map file", cmd_open, cmd_open_init},
-		{"p",    "print current block", cmd_print, cmd_print_init},
-		{"P",  "project", cmd_project, cmd_project_init},
-		{"q",     "exit program session", cmd_quit, cmd_quit_init},
-		{"Q",        "alias for q!", cmd_Quit},
-		{":",        "long commands starting with :", cmd_colon},
-		{"r",   "change file size", cmd_resize},
-		{"s",     "seek to an offset", cmd_seek, cmd_seek_init},
-		{"t",        "type information (cparse)", cmd_type, cmd_type_init},
-		{"T",     "Text log utility", cmd_log, cmd_log_init},
-		{"u",        "uname/undo", cmd_undo},
-		{"<",        "pipe into RCons.readChar", cmd_pipein},
-		{"V",   "enter visual mode", cmd_visual},
-		{"v",   "enter visual mode", cmd_panels},
-		{"w",    "write bytes", cmd_write, cmd_write_init},
-		{"x",        "alias for px", cmd_hexdump},
-		{"y",     "yank bytes", cmd_yank},
-		{"z",     "zignatures", cmd_zign, cmd_zign_init},
+		{"!",        "run system command", cmd_system, NULL, &system_help},
+		{"_",        "print last output", cmd_last, NULL, &underscore_help},
+		{"#",        "calculate hash", cmd_hash, NULL, &hash_help},
+		{"$",        "alias", cmd_alias, NULL, &alias_help},
+		{"%",        "short version of 'env' command", cmd_env, NULL, &env_help},
+		{"&",        "tasks", cmd_tasks, NULL, &tasks_help},
+		{"(",        "macro", cmd_macro, cmd_macro_init, &macro_help},
+		{"*",        "pointer read/write", cmd_pointer, NULL, &pointer_help},
+		{"-",        "open cfg.editor and run script", cmd_stdin, NULL, &stdin_help},
+		{".",        "interpret", cmd_interpret, NULL, &interpret_help},
+		{"/",        "search kw, pattern aes", cmd_search, cmd_search_init, &search_help},
+		{"=",        "io pipe", cmd_rap, NULL, &rap_help},
+		{"?",        "help message", cmd_help, cmd_help_init, &help_help},
+		{"\\",       "alias for =!", cmd_rap_run, NULL, &rap_run_help},
+		{"'",        "alias for =!", cmd_rap_run, NULL, &rap_run_help},
+		{"0",       "alias for s 0x", cmd_ox, NULL, &zero_help},
+		{"a", "analysis", cmd_anal, cmd_anal_init, &anal_help},
+		{"b",    "change block size", cmd_bsize, NULL, &b_help},
+		{"c",      "compare memory", cmd_cmp, cmd_cmp_init, &c_help},
+		{"C",     "code metadata", cmd_meta, cmd_meta_init, &C_help},
+		{"d",    "debugger operations", cmd_debug, cmd_debug_init, &d_help},
+		{"e",     "evaluate configuration variable", cmd_eval, cmd_eval_init, &e_help},
+		{"f",     "get/set flags", cmd_flag, cmd_flag_init, &f_help},
+		{"g",        "egg manipulation", cmd_egg, cmd_egg_init, &g_help},
+		{"i",     "get file info", cmd_info, cmd_info_init, &i_help},
+		{"k",    "perform sdb query", cmd_kuery, NULL, &k_help},
+		{"l",       "list files and directories", cmd_ls, NULL, &l_help},
+		{"j",    "join the contents of the two files", cmd_join, NULL, &j_help},
+		{"h",    "show the top n number of line in file", cmd_head, NULL, &h_help},
+		{"L",        "manage dynamically loaded plugins", cmd_plugins, NULL, &L_help},
+		{"m",    "mount filesystem", cmd_mount, cmd_mount_init, &m_help},
+		{"o",     "open or map file", cmd_open, cmd_open_init, &o_help},
+		{"p",    "print current block", cmd_print, cmd_print_init, &p_help},
+		{"P",  "project", cmd_project, cmd_project_init, &P_help},
+		{"q",     "exit program session", cmd_quit, cmd_quit_init, &q_help},
+		{"Q",        "alias for q!", cmd_Quit, NULL, &Q_help},
+		{":",        "long commands starting with :", cmd_colon, NULL, &colon_help},
+		{"r",   "change file size", cmd_resize, NULL, &r_help},
+		{"s",     "seek to an offset", cmd_seek, cmd_seek_init, &s_help},
+		{"t",        "type information (cparse)", cmd_type, cmd_type_init, &t_help},
+		{"T",     "Text log utility", cmd_log, cmd_log_init, &T_help},
+		{"u",        "uname/undo", cmd_undo, NULL, &u_help},
+		{"<",        "pipe into RCons.readChar", cmd_pipein, NULL, &pipein_help},
+		{"V",   "enter visual mode", cmd_visual, NULL, &V_help},
+		{"v",   "enter visual mode", cmd_panels, NULL, &v_help},
+		{"w",    "write bytes", cmd_write, cmd_write_init, &w_help, &w_group_help, R_CMD_DESC_TYPE_GROUP, w_handler},
+		{"x",        "alias for px", cmd_hexdump, NULL, &x_help},
+		{"y",     "yank bytes", cmd_yank, NULL, &y_help},
+		{"z",     "zignatures", cmd_zign, cmd_zign_init, &z_help},
 	};
 
 	core->rcmd = r_cmd_new ();
@@ -7141,11 +7171,28 @@ R_API void r_core_cmd_init(RCore *core) {
 	core->rcmd->macro.cb_printf = (PrintfCallback)r_cons_printf;
 	r_cmd_set_data (core->rcmd, core);
 	core->cmd_descriptors = r_list_newf (free);
-	int i;
+
+	RCmdDesc *root = r_cmd_get_root (core->rcmd);
+	size_t i;
 	for (i = 0; i < R_ARRAY_SIZE (cmds); i++) {
 		r_cmd_add (core->rcmd, cmds[i].cmd, cmds[i].cb);
-		if (cmds[i].descriptor_init) {
-			RCmdDesc *cd = r_cmd_get_desc (core->rcmd, cmds[i].cmd);
+
+		RCmdDesc *cd = NULL;
+		switch (cmds[i].type) {
+		case R_CMD_DESC_TYPE_OLDINPUT:
+			cd = r_cmd_desc_oldinput_new (core->rcmd, root, cmds[i].cmd, cmds[i].cb, cmds[i].help);
+			break;
+		case R_CMD_DESC_TYPE_ARGV:
+			cd = r_cmd_desc_argv_new (core->rcmd, root, cmds[i].cmd, cmds[i].argv_cb, cmds[i].help);
+			break;
+		case R_CMD_DESC_TYPE_INNER:
+			cd = r_cmd_desc_inner_new (core->rcmd, root, cmds[i].cmd, cmds[i].help);
+			break;
+		case R_CMD_DESC_TYPE_GROUP:
+			cd = r_cmd_desc_group_new (core->rcmd, root, cmds[i].cmd, cmds[i].argv_cb, cmds[i].help, cmds[i].group_help);
+			break;
+		}
+		if (cd && cmds[i].descriptor_init) {
 			cmds[i].descriptor_init (core, cd);
 		}
 	}

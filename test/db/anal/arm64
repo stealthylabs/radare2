@@ -1,3 +1,29 @@
+NAME=rcall
+FILE=-
+CMDS=<<EOF
+e asm.arch=arm
+e asm.bits=64
+wx e18f1394 # BL XXX
+s+4
+wx 00013fd6 # BLR x8
+ao~type[1]
+ao@0~type[1]
+/at call
+?e --
+/at ucall
+?e --
+/at rcall
+EOF
+EXPECT=<<EOF
+rcall
+call
+0x00000000 4 bl 0x4e3f84
+--
+--
+0x00000004 4 blr x8
+EOF
+RUN
+
 NAME=noreturn errno
 FILE=bins/mach0/BatteryLife.arm_64.1
 CMDS=<<EOF
@@ -65,6 +91,7 @@ EOF
 EXPECT=<<EOF
 address: 0x100007f10
 opcode: irg x8, sp, x8
+esilcost: 0
 disasm: irg x8, sp, x8
 pseudo: irg x8,sp,x8 
 mnemonic: irg
@@ -81,6 +108,7 @@ family: sec
 --
 address: 0x100007f14
 opcode: addg x9, x8, 0x20, 0x0
+esilcost: 0
 disasm: addg x9, x8, 0x20, 0x0
 pseudo: addg x9,x8,0x20, 0x0 
 mnemonic: addg

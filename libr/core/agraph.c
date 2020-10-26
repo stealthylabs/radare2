@@ -2,6 +2,7 @@
 
 #include <r_core.h>
 #include <r_cons.h>
+#include <r_util/r_graph_drawable.h>
 #include <ctype.h>
 #include <limits.h>
 
@@ -995,7 +996,7 @@ static RList **compute_classes(const RAGraph *g, Sdb *v_nodes, int is_left, int 
 }
 
 static int cmp_dist(const size_t a, const size_t b) {
-	return (int) a < (int) b;
+	return (a < b) - (a > b);
 }
 
 static RGraphNode *get_sibling(const RAGraph *g, const RANode *n, int is_left, int is_adjust_class) {
@@ -1332,11 +1333,11 @@ static void place_single(const RAGraph *g, int l, const RGraphNode *bm, const RG
 }
 
 static int RM_listcmp(const struct len_pos_t *a, const struct len_pos_t *b) {
-	return a->pos < b->pos;
+	return (a->pos < b->pos) - (a->pos > b->pos);
 }
 
 static int RP_listcmp(const struct len_pos_t *a, const struct len_pos_t *b) {
-	return a->pos >= b->pos;
+	return (a->pos > b->pos) - (a->pos < b->pos);
 }
 
 static void collect_changes(const RAGraph *g, int l, const RGraphNode *b, int from_up, int s, int e, RList *list, int is_left) {
@@ -4107,8 +4108,11 @@ static void nextword(RCore *core, RAGraph *g, const char *word) {
 }
 
 R_API int r_core_visual_graph(RCore *core, RAGraph *g, RAnalFunction *_fcn, int is_interactive) {
+	if (is_interactive && !r_cons_is_interactive ()) {
+		eprintf ("Interactive graph mode requires scr.interactive=true.\n");
+		return 0;
+	}
 	int o_asmqjmps_letter = core->is_asmqjmps_letter;
-	int o_scrinteractive = r_cons_is_interactive ();
 	int o_vmode = core->vmode;
 	int exit_graph = false, is_error = false;
 	int update_seek = false;
@@ -4165,7 +4169,6 @@ R_API int r_core_visual_graph(RCore *core, RAGraph *g, RAnalFunction *_fcn, int 
 	} else {
 		o_can = g->can;
 	}
-	r_config_set_i (core->config, "scr.interactive", false);
 	g->can = can;
 	g->movspeed = r_config_get_i (core->config, "graph.scroll");
 	g->show_node_titles = r_config_get_i (core->config, "graph.ntitles");
@@ -4610,8 +4613,6 @@ R_API int r_core_visual_graph(RCore *core, RAGraph *g, RAnalFunction *_fcn, int 
 		case 'd':
 			{
 				showcursor (core, true);
-				// WTF?
-				r_config_set_i (core->config, "scr.interactive", true);
 				r_core_visual_define (core, "", 0);
 				get_bbupdate (g, core, fcn);
 				showcursor (core, false);
@@ -4674,11 +4675,7 @@ R_API int r_core_visual_graph(RCore *core, RAGraph *g, RAnalFunction *_fcn, int 
 			if (graphCursor) {
 				graphNodeMove (g, 'l', movspeed * 2);
 			} else {
-				if (is_mini (g)) {
-					discroll = 0;
-				} else {
-					can->sx -= (5 * movspeed) * (invscroll? -1: 1);
-				}
+				can->sx -= (5 * movspeed) * (invscroll? -1: 1);
 			}
 			break;
 		case 'c':
@@ -4783,9 +4780,7 @@ R_API int r_core_visual_graph(RCore *core, RAGraph *g, RAnalFunction *_fcn, int 
 			break;
 		case '/':
 			showcursor (core, true);
-			r_config_set_i (core->config, "scr.interactive", true);
 			r_core_cmd0 (core, "?i highlight;e scr.highlight=`yp`");
-			r_config_set_i (core->config, "scr.interactive", false);
 			showcursor (core, false);
 			break;
 		case ':':
@@ -4914,7 +4909,6 @@ R_API int r_core_visual_graph(RCore *core, RAGraph *g, RAnalFunction *_fcn, int 
 	free (grd);
 	if (graph_allocated) {
 		r_agraph_free (g);
-		r_config_set_i (core->config, "scr.interactive", o_scrinteractive);
 	} else {
 		g->can = o_can;
 	}
@@ -4939,6 +4933,7 @@ R_API RAGraph *create_agraph_from_graph(const RGraph/*<RGraphNodeInfo>*/ *graph)
 	if (!result_agraph) {
 		return NULL;
 	}
+	result_agraph->need_reload_nodes = false;
 	// Cache lookup to build edges
 	HtPP /*<RGraphNode *node, RANode *anode>*/ *hashmap = ht_pp_new0 ();
 	if (!hashmap) {

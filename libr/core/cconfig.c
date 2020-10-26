@@ -51,28 +51,42 @@ static void print_node_options(RConfigNode *node) {
 }
 
 static int compareName(const RAnalFunction *a, const RAnalFunction *b) {
-	return a && b && a->name && b->name && strcmp (a->name, b->name);
+	return (a && b && a->name && b->name ?  strcmp (a->name, b->name) : 0);
 }
 
 static int compareNameLen(const RAnalFunction *a, const RAnalFunction *b) {
-	return a && b && a->name && b->name && strlen (a->name) > strlen (b->name);
+	size_t la, lb;
+	if (!a || !b || !a->name || !b->name) {
+		return 0;
+	}
+	la = strlen (a->name);
+	lb = strlen (a->name);
+	return (la > lb) - (la < lb);
 }
 
 static int compareAddress(const RAnalFunction *a, const RAnalFunction *b) {
-	return a && b && a->addr && b->addr && a->addr > b->addr;
+	return (a && b && a->addr && b->addr ? (a->addr > b->addr) - (a->addr < b->addr) : 0);
 }
 
 static int compareType(const RAnalFunction *a, const RAnalFunction *b) {
-	return a && b && a->diff->type && b->diff->type && a->diff->type > b->diff->type;
+	return (a && b && a->diff->type && b->diff->type ?
+			(a->diff->type > b->diff->type) - (a->diff->type < b->diff->type) : 0);
 }
 
 static int compareSize(const RAnalFunction *a, const RAnalFunction *b) {
+	ut64 sa, sb;
 	// return a && b && a->_size < b->_size;
-	return a && b && r_anal_function_realsize (a) > r_anal_function_realsize (b);
+	if (!a || !b) {
+		return 0;
+	}
+	sa = r_anal_function_realsize (a);
+	sb = r_anal_function_realsize (b);
+	return (sa > sb) - (sa < sb);
 }
 
 static int compareDist(const RAnalFunction *a, const RAnalFunction *b) {
-	return a && b && a->diff->dist && b->diff->dist && a->diff->dist > b->diff->dist;
+	return (a && b && a->diff->dist && b->diff->dist ?
+			(a->diff->dist > b->diff->dist) - (a->diff->dist < b->diff->dist) : 0);
 }
 
 static bool cb_diff_sort(void *_core, void *_node) {
@@ -544,6 +558,19 @@ static void update_asmarch_options(RCore *core, RConfigNode *node) {
 	}
 }
 
+static void update_asmbits_options(RCore *core, RConfigNode *node) {
+	if (core && core->rasm && core->rasm->cur && node) {
+		int bits = core->rasm->cur->bits;
+		int i;
+		r_list_purge (node->options);
+		for (i = 1; i <= bits; i <<= 1) {
+			if (i & bits) {
+				SETOPTIONS (node, r_str_newf ("%d", i), NULL);
+			}
+		}
+	}
+}
+
 static bool cb_asmarch(void *user, void *data) {
 	char asmparser[32];
 	RCore *core = (RCore *) user;
@@ -604,6 +631,7 @@ static bool cb_asmarch(void *user, void *data) {
 		} else {
 			bits = 64;
 		}
+		update_asmbits_options (core, r_config_node_get (core->config, "asm.bits"));
 	}
 	snprintf (asmparser, sizeof (asmparser), "%s.pseudo", node->value);
 	r_config_set (core->config, "asm.parser", asmparser);
@@ -674,6 +702,7 @@ static bool cb_asmarch(void *user, void *data) {
 		r_core_anal_type_init (core);
 	}
 	r_core_anal_cc_init (core);
+
 	return true;
 }
 
@@ -694,7 +723,14 @@ static bool cb_dbgbtdepth(void *user, void *data) {
 static bool cb_asmbits(void *user, void *data) {
 	RCore *core = (RCore *) user;
 	RConfigNode *node = (RConfigNode *) data;
-	int ret = 0;
+
+	if (node->value[0] == '?') {
+		update_asmbits_options (core, node);
+		print_node_options (node);
+		return false;
+	}
+
+	bool ret = false;
 	if (!core) {
 		eprintf ("user can't be NULL\n");
 		return false;
@@ -720,6 +756,8 @@ static bool cb_asmbits(void *user, void *data) {
 		}
 		if (!r_anal_set_bits (core->anal, bits)) {
 			eprintf ("asm.arch: Cannot setup '%d' bits analysis engine\n", bits);
+		} else {
+			ret = true;
 		}
 		core->print->bits = bits;
 	}
@@ -889,9 +927,26 @@ static bool cb_asmos(void *user, void *data) {
 	return true;
 }
 
+static void update_asmparser_options(RCore *core, RConfigNode *node) {
+	RListIter *iter;
+	RParsePlugin *parser;
+	if (core && node && core->parser && core->parser->parsers) {
+		r_list_purge (node->options);
+		r_list_foreach (core->parser->parsers, iter, parser) {
+			SETOPTIONS (node, parser->name, NULL);
+		}
+	}
+}
+
 static bool cb_asmparser(void *user, void *data) {
 	RCore *core = (RCore*) user;
 	RConfigNode *node = (RConfigNode*) data;
+	if (node->value[0] == '?') {
+		update_asmparser_options (core, node);
+		print_node_options (node);
+		return false;
+	}
+
 	return r_parse_use (core->parser, node->value);
 }
 
@@ -2111,7 +2166,7 @@ static bool scr_vtmode(void *user, void *data) {
 	}
 	node->i_value = node->i_value > 2 ? 2 : node->i_value;
 	r_line_singleton ()->vtmode = r_cons_singleton ()->vtmode = node->i_value;
-	
+
 	DWORD mode;
 	HANDLE input = GetStdHandle (STD_INPUT_HANDLE);
 	GetConsoleMode (input, &mode);
@@ -2975,7 +3030,7 @@ R_API int r_core_config_init(RCore *core) {
 	SETPREF ("esil.fillstack", "", "Initialize ESIL stack with (random, debrujn, sequence, zeros, ...)");
 	SETICB ("esil.verbose", 0, &cb_esilverbose, "Show ESIL verbose level (0, 1, 2)");
 	SETICB ("esil.gotolimit", core->anal->esil_goto_limit, &cb_gotolimit, "Maximum number of gotos per ESIL expression");
-	SETICB ("esil.stack.depth", 32, &cb_esilstackdepth, "Number of elements that can be pushed on the esilstack");
+	SETICB ("esil.stack.depth", 256, &cb_esilstackdepth, "Number of elements that can be pushed on the esilstack");
 	SETI ("esil.stack.size", 0xf0000, "Set stack size in ESIL VM");
 	SETI ("esil.stack.addr", 0x100000, "Set stack address in ESIL VM");
 	SETPREF ("esil.stack.pattern", "0", "Specify fill pattern to initialize the stack (0, w, d, i)");
@@ -3041,7 +3096,7 @@ R_API int r_core_config_init(RCore *core) {
 	n = NODECB ("emu.skip", "ds", &cb_emuskip);
 	SETDESC (n, "Skip metadata of given types in asm.emu");
 	SETOPTIONS (n, "d", "c", "s", "f", "m", "h", "C", "r", NULL);
-	SETBPREF ("asm.filter", "true", "Replace numeric values by flags (e.g. 0x4003e0 -> sym.imp.printf)");
+	SETBPREF ("asm.sub.names", "true", "Replace numeric values by flags (e.g. 0x4003e0 -> sym.imp.printf)");
 	SETPREF ("asm.strip", "", "strip all instructions given comma separated types");
 	SETBPREF ("asm.optype", "false", "show opcode type next to the instruction bytes");
 	SETBPREF ("asm.lines.fcn", "true", "Show function boundary lines");
@@ -3069,7 +3124,7 @@ R_API int r_core_config_init(RCore *core) {
 	SETBPREF ("asm.lines.wide", "false", "Put a space between lines");
 	SETBPREF ("asm.fcnsig", "true", "Show function signature in disasm");
 	SETICB ("asm.lines.width", 7, &cb_asmlineswidth, "Number of columns for program flow arrows");
-	SETICB ("asm.sub.varmin", 0x100, &cb_asmsubvarmin, "Minimum value to substitute in instructions (asm.var.sub)");
+	SETICB ("asm.sub.varmin", 0x100, &cb_asmsubvarmin, "Minimum value to substitute in instructions (asm.sub.var)");
 	SETCB ("asm.sub.tail", "false", &cb_asmsubtail, "Replace addresses with prefix .. syntax");
 	SETBPREF ("asm.middle", "false", "Allow disassembling jumps in the middle of an instruction");
 	SETBPREF ("asm.noisy", "true", "Show comments considered noisy but possibly useful");
@@ -3102,7 +3157,7 @@ R_API int r_core_config_init(RCore *core) {
 	SETBPREF ("asm.capitalize", "false", "Use camelcase at disassembly");
 	SETBPREF ("asm.var", "true", "Show local function variables in disassembly");
 	SETBPREF ("asm.var.access", "false", "Show accesses of local variables");
-	SETBPREF ("asm.var.sub", "true", "Substitute variables in disassembly");
+	SETBPREF ("asm.sub.var", "true", "Substitute variables in disassembly");
 	SETI ("asm.var.summary", 0, "Show variables summary instead of full list in disasm (0, 1, 2)");
 	SETBPREF ("asm.sub.varonly", "true", "Substitute the entire variable expression with the local variable name (e.g. [local10h] instead of [ebp+local10h])");
 	SETBPREF ("asm.sub.reg", "false", "Substitute register names with their associated role name (drp~=)");
@@ -3124,7 +3179,9 @@ R_API int r_core_config_init(RCore *core) {
 	n = NODECB ("asm.features", "", &cb_asmfeatures);
 	SETDESC (n, "Specify supported features by the target CPU");
 	update_asmfeatures_options (core, n);
-	SETCB ("asm.parser", "x86.pseudo", &cb_asmparser, "Set the asm parser to use");
+	n = NODECB ("asm.parser", "x86.pseudo", &cb_asmparser);
+	SETDESC (n, "Set the asm parser to use");
+	update_asmparser_options (core, n);
 	SETCB ("asm.segoff", "false", &cb_segoff, "Show segmented address in prompt (x86-16)");
 	SETCB ("asm.decoff", "false", &cb_decoff, "Show segmented address in prompt (x86-16)");
 	SETICB ("asm.seggrn", 4, &cb_seggrn, "Segment granularity in bits (x86-16)");
@@ -3138,6 +3195,8 @@ R_API int r_core_config_init(RCore *core) {
 #else
 	SETICB ("asm.bits", 32, &cb_asmbits, "Word size in bits at assembler");
 #endif
+	n = r_config_node_get(cfg, "asm.bits");
+	update_asmbits_options (core, n);
 	SETBPREF ("asm.functions", "true", "Show functions in disassembly");
 	SETBPREF ("asm.xrefs", "true", "Show xrefs in disassembly");
 	SETBPREF ("asm.demangle", "true", "Show demangled symbols in disasm");
@@ -3255,13 +3314,14 @@ R_API int r_core_config_init(RCore *core) {
 	SETI ("zign.mincc", 10, "Minimum cyclomatic complexity for matching");
 	SETBPREF ("zign.graph", "true", "Use graph metrics for matching");
 	SETBPREF ("zign.bytes", "true", "Use bytes patterns for matching");
-	SETBPREF ("zign.offset", "true", "Use original offset for matching");
+	SETBPREF ("zign.offset", "false", "Use original offset for matching");
 	SETBPREF ("zign.refs", "true", "Use references for matching");
 	SETBPREF ("zign.hash", "true", "Use Hash for matching");
 	SETBPREF ("zign.types", "true", "Use types for matching");
 	SETBPREF ("zign.autoload", "false", "Autoload all zignatures located in " R_JOIN_2_PATHS ("~", R2_HOME_ZIGNS));
 	SETPREF ("zign.diff.bthresh", "1.0", "Threshold for diffing zign bytes [0, 1] (see zc?)");
 	SETPREF ("zign.diff.gthresh", "1.0", "Threshold for diffing zign graphs [0, 1] (see zc?)");
+	SETPREF ("zign.threshold", "0.0", "Minimum similarity required for inclusion in zb output");
 
 	/* diff */
 	SETCB ("diff.sort", "addr", &cb_diff_sort, "Specify function diff sorting column see (e diff.sort=?)");
@@ -3448,7 +3508,13 @@ R_API int r_core_config_init(RCore *core) {
 	SETPREF ("http.index", "index.html", "Main html file to check in directory");
 	SETPREF ("http.bind", "localhost", "Server address");
 	SETPREF ("http.homeroot", R_JOIN_2_PATHS ("~", R2_HOME_WWWROOT), "http home root directory");
-#if __ANDROID__
+#if __WINDOWS__
+	{
+		char *wwwroot = r_str_newf ("%s\\share\\www", r_sys_prefix (NULL));
+		SETPREF ("http.root", wwwroot, "http root directory");
+		free (wwwroot);
+	}
+#elif __ANDROID__
 	SETPREF ("http.root", "/data/data/org.radare.radare2installer/www", "http root directory");
 #else
 	SETPREF ("http.root", R2_WWWROOT, "http root directory");

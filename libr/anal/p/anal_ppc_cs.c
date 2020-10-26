@@ -2,8 +2,8 @@
 
 #include <r_anal.h>
 #include <r_lib.h>
-#include <capstone/capstone.h>
-#include <capstone/ppc.h>
+#include <capstone.h>
+#include <ppc.h>
 #include "../../asm/arch/ppc/libvle/vle.h"
 
 #define SPR_HID0 0x3f0 /* Hardware Implementation Register 0 */
@@ -179,7 +179,7 @@ static void opex(RStrBuf *buf, csh handle, cs_insn *insn) {
 			break;
 		case SYSZ_OP_IMM:
 			r_strbuf_append (buf, "\"type\":\"imm\"");
-			r_strbuf_appendf (buf, ",\"value\":%"PFMT64d, op->imm);
+			r_strbuf_appendf (buf, ",\"value\":%" PFMT64d, (st64)op->imm);
 			break;
 		case SYSZ_OP_MEM:
 			r_strbuf_append (buf, "\"type\":\"mem\"");

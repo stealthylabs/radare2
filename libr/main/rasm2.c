@@ -204,7 +204,12 @@ static void rasm2_list(RAsmState *as, const char *arch) {
 			bits[0] = 0;
 			if (h->bits == 27) {
 				strcat (bits, "27");
+			} else if (h->bits == 0) {
+				strcat (bits, "any");
 			} else {
+				if (h->bits & 4) {
+					strcat (bits, "4 ");
+				}
 				if (h->bits & 8) {
 					strcat (bits, "8 ");
 				}
@@ -728,17 +733,17 @@ R_API int r_main_rasm2(int argc, const char *argv[]) {
 		if (p) {
 			*p = 0;
 			if (*filters) {
-				r_asm_filter_input (as->a, filters);
+				r_asm_sub_names_input (as->a, filters);
 			}
 			if (p[1]) {
-				r_asm_filter_output (as->a, p + 1);
+				r_asm_sub_names_output (as->a, p + 1);
 			}
 			*p = ':';
 		} else {
 			if (dis) {
-				r_asm_filter_output (as->a, filters);
+				r_asm_sub_names_output (as->a, filters);
 			} else {
-				r_asm_filter_input (as->a, filters);
+				r_asm_sub_names_input (as->a, filters);
 			}
 		}
 	}

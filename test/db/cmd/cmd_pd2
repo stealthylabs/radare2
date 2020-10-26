@@ -272,7 +272,7 @@ EXPECT=<<EOF
 |           ; arg func main @ r0
 |           ; arg int argc @ r1
 |           0x00008174      b80000eb       bl sym.__libc_start_main    ; lr=0x8178 -> 0xeb0002a4 ; pc=0x845c -> 0xe92d41f0
-|                                                                      ; int __libc_start_main(?, -1, ?, ?, ?, ?, -1)
+|                                                                      ; int __libc_start_main(?, ?, ?, ?, ?, ?, -1)
 \           0x00008178      a40200eb       bl sym.abort                ; lr=0x817c -> 0xe92d4030 ; pc=0x8c10 -> 0xe59f62a0
 \                                                                      ; void abort(void)
 
@@ -281,7 +281,7 @@ EXPECT=<<EOF
 |           ; arg int argc @ r1
 |              ; lr=0x8178 -> 0xeb0002a4
 |              ; pc=0x845c -> 0xe92d41f0 sym.__libc_start_main
-|              ; int __libc_start_main(?, -1, ?, ?, ?, ?, -1)
+|              ; int __libc_start_main(?, ?, ?, ?, ?, ?, -1)
 |           0x00008174      b80000eb       bl sym.__libc_start_main
 |              ; lr=0x817c -> 0xe92d4030
 |              ; pc=0x8c10 -> 0xe59f62a0 sym.abort
@@ -296,7 +296,7 @@ EXPECT=<<EOF
 | ; arg int argc @ r1                                |
 |    ; lr=0x8178 -> 0xeb0002a4                       |
 |    ; pc=0x845c -> 0xe92d41f0 sym.__libc_start_main |
-|    ; int __libc_start_main(?, -1, ?, ?, ?, ?, -1)  |
+|    ; int __libc_start_main(?, ?, ?, ?, ?, ?, -1)   |
 | bl sym.__libc_start_main;[oa]                      |
 |    ; lr=0x817c -> 0xe92d4030                       |
 |    ; pc=0x8c10 -> 0xe59f62a0 sym.abort             |
@@ -527,7 +527,7 @@ FILE=bins/elf/abcde-qt32
 CMDS=<<EOF
 e asm.demangle=true
 e asm.bytes=false
-e asm.filter=false
+e asm.sub.names=false
 e asm.sub.jmp=false
 aa
 e asm.cmt.right=true
@@ -556,7 +556,7 @@ NAME=newlined-comment-refline fix (#14627), wayward rip-relative flag fixes
 FILE=bins/elf/ls
 CMDS=<<EOF
 e asm.bytes=false
-e asm.filter=true
+e asm.sub.names=true
 (pd_tests; e asm.sub.rel=true; pd 15; ?e; e asm.sub.rel=false; pd 1 @ 0x000041ee; pd 1 @ 0x00004225)
 (insn_tests; e scr.color=0; .(pd_tests); ?e; e scr.color=1; .(pd_tests))
 s 0x000041e0
@@ -840,5 +840,16 @@ EXPECT=<<EOF
    entry0 + 0                   mov bl, 0x2a
    entry0 + 2                   xor eax, eax
    entry0 + 4                   inc eax
+EOF
+RUN
+
+NAME=seek with spaces
+FILE=-
+CMDS=<<EOF
+wx 010203040506
+p8 1 @ 1 + 3
+EOF
+EXPECT=<<EOF
+05
 EOF
 RUN

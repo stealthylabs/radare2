@@ -332,7 +332,7 @@ static int wasm_op(RAnal *anal, RAnalOp *op, ut64 addr, const ut8 *data, int len
 			break;
 		case WASM_OP_NOP:
 			op->type = R_ANAL_OP_TYPE_NOP;
-			r_strbuf_setf (&op->esil, "");
+			r_strbuf_setf (&op->esil, "%s", "");
 			break;
 		case WASM_OP_CALL:
 		case WASM_OP_CALLINDIRECT:
@@ -448,6 +448,7 @@ static char *get_reg_profile(RAnal *anal) {
 		"=PC	pc\n"
 		"=BP	bp\n"
 		"=SP	sp\n"
+		"=A0	r0\n"
 		"gpr	sp	.32	0	0\n" // stack pointer
 		"gpr	pc	.32	4	0\n" // program counter
 		"gpr	bp	.32	8	0\n" // base pointer // unused

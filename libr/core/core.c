@@ -110,8 +110,6 @@ static int getreloc_tree(const void *user, const RBNode *n, void *user2) {
         return 0;
 }
 
-// TODO: Use sdb in rbin to accelerate this
-// we shuold use aligned reloc addresses instead of iterating all of them
 R_API RBinReloc *r_core_getreloc(RCore *core, ut64 addr, int size) {
         if (size < 1 || addr == UT64_MAX) {
                 return NULL;
@@ -471,7 +469,7 @@ static ut64 num_callback(RNum *userptr, const char *str, int *ok) {
 				if (ok) {
 					*ok = true;
 				}
-				ut64 dst = r_anal_fcn_label_get (core->anal, fcn, str + 1);
+				ut64 dst = r_anal_function_get_label (fcn, str + 1);
 				if (dst == UT64_MAX) {
 					dst = fcn->addr;
 				}
@@ -889,7 +887,7 @@ static const char *radare_argv[] = {
 	"ao?", "ao", "aoj", "aoe", "aor", "aos", "aom", "aod", "aoda", "aoc", "ao*",
 	"aO", "ap",
 	"ar?", "ar", "ar0", "ara?", "ara", "ara+", "ara-", "aras", "arA", "arC", "arr", "arrj", "ar=",
-	"arb", "arc", "ard", "arn", "aro", "arp?", "arp", "arpi", "arp.", "arpj", "arps",
+	"arb", "arc", "ard", "arn", "aro", "arp?", "arp", "arpi", "arpg", "arp.", "arpj", "arps",
 	"ars", "art", "arw",
 	"as?", "as", "asc", "asca", "asf", "asj", "asl", "ask",
 	"av?", "av", "avj", "av*", "avr", "avra", "avraj", "avrr", "avrD",
@@ -1946,19 +1944,25 @@ static int autocomplete(RLineCompletion *completion, RLineBuffer *buf, RLineProm
 }
 
 R_API int r_core_fgets(char *buf, int len) {
-	const char *ptr;
-	RLine *rli = r_line_singleton ();
+	RCons *cons = r_cons_singleton ();
+	RLine *rli = cons->line;
+	bool prompt = cons->context->is_interactive;
 	buf[0] = '\0';
-	r_line_completion_set (&rli->completion, radare_argc, radare_argv);
- 	rli->completion.run = autocomplete;
- 	rli->completion.run_user = rli->user;
-	ptr = r_line_readline ();
+	if (prompt) {
+		r_line_completion_set (&rli->completion, radare_argc, radare_argv);
+		rli->completion.run = autocomplete;
+		rli->completion.run_user = rli->user;
+	} else {
+		rli->history.data = NULL;
+		r_line_completion_set (&rli->completion, 0, NULL);
+		rli->completion.run = NULL;
+		rli->completion.run_user = NULL;
+	}
+	const char *ptr = r_line_readline ();
 	if (!ptr) {
 		return -1;
 	}
-	strncpy (buf, ptr, len - 1);
-	buf[len - 1] = 0;
-	return strlen (buf);
+	return r_str_ncpy (buf, ptr, len - 1);
 }
 
 static const char *r_core_print_offname(void *p, ut64 addr) {
@@ -2145,7 +2149,7 @@ static char *r_core_anal_hasrefs_to_depth(RCore *core, ut64 value, int depth) {
 			r_strbuf_appendf (s, " %slibrary%s", c, cend);
 		}
 		if (type & R_ANAL_ADDR_TYPE_ASCII) {
-			r_strbuf_appendf (s, " %sascii%s ('%c')", c, cend, value);
+			r_strbuf_appendf (s, " %sascii%s ('%c')", c, cend, (char)value);
 		}
 		if (type & R_ANAL_ADDR_TYPE_SEQUENCE) {
 			r_strbuf_appendf (s, " %ssequence%s", c, cend);
@@ -2219,7 +2223,7 @@ static char *r_core_anal_hasrefs_to_depth(RCore *core, ut64 value, int depth) {
 		ut64 *n64 = (ut64*)buf;
 		r_io_read_at (core->io, value, buf, sizeof (buf));
 		ut64 n = (core->rasm->bits == 64)? *n64: *n32;
-		if(n != value) {
+		if (n != value) {
 			char* rrstr = r_core_anal_hasrefs_to_depth (core, n, depth-1);
 			if (rrstr) {
 				if (rrstr[0]) {
@@ -2290,11 +2294,12 @@ static int mywrite(const ut8 *buf, int len) {
 }
 
 static bool exists_var(RPrint *print, ut64 func_addr, char *str) {
-	char *name_key = sdb_fmt ("var.0x%"PFMT64x ".%d.%s", func_addr, 1, str);
-	if (sdb_const_get_len (((RCore*)(print->user))->anal->sdb_fcns, name_key, NULL, 0)) {
-		return true;
+	RAnal *anal = ((RCore*)(print->user))->anal;
+	RAnalFunction *fcn = r_anal_get_function_at (anal, func_addr);
+	if (!fcn) {
+		return false;
 	}
-	return false;
+	return !!r_anal_function_get_var_byname (fcn, str);
 }
 
 static bool r_core_anal_log(struct r_anal_t *anal, const char *msg) {
@@ -2354,9 +2359,9 @@ static void __init_autocomplete_default (RCore* core) {
 	};
 	const char *files[] = {
 		".", "..", ".*", "/F", "/m", "!", "!!", "#!c", "#!v", "#!cpipe", "#!vala",
-		"#!rust", "#!zig", "#!pipe", "#!python", "aeli", "arp", "dmd", "drp", "o",
+		"#!rust", "#!zig", "#!pipe", "#!python", "aeli", "arp", "arpg", "dmd", "drp", "drpg", "o",
 		"idp", "idpi", "L", "obf", "o+", "oc", "r2", "rabin2", "rasm2", "rahash2", "rax2",
-		"rafind2", "cd", "on", "op", "wf", "rm", "wF", "wp", "Sd", "Sl", "to", "pm",
+		"rafind2", "cd", "ls", "on", "op", "wf", "rm", "wF", "wp", "Sd", "Sl", "to", "pm",
 		"/m", "zos", "zfd", "zfs", "zfz", "cat", "wta", "wtf", "wxf", "dml", "vi",
 		"less", "head", "tail", NULL
 	};
@@ -2684,7 +2689,7 @@ R_API bool r_core_init(RCore *core) {
 	core->anal->flg_fcn_set = core_flg_fcn_set;
 	r_anal_bind (core->anal, &(core->parser->analb));
 	core->parser->flag_get = r_core_flag_get_by_spaces;
-	core->parser->label_get = r_anal_fcn_label_at;
+	core->parser->label_get = r_anal_function_get_label_at;
 
 	r_core_bind (core, &(core->anal->coreb));
 
@@ -3154,14 +3159,16 @@ reaccept:
 				}
 				goto out_of_function;
 			}
-			switch ((ut8)cmd) {
+			switch (cmd) {
 			case RAP_PACKET_OPEN:
 				r_socket_read_block (c, &flg, 1); // flags
 				eprintf ("open (%d): ", cmd);
 				r_socket_read_block (c, &cmd, 1); // len
 				pipefd = -1;
-				ptr = malloc (cmd + 1);
-				//XXX cmd is ut8..so <256 if (cmd<RAP_PACKET_MAX)
+				if (UT8_ADD_OVFCHK (cmd, 1)) {
+					goto out_of_function;
+				}
+				ptr = malloc ((size_t)cmd + 1);
 				if (!ptr) {
 					eprintf ("Cannot malloc in rmt-open len = %d\n", cmd);
 				} else {

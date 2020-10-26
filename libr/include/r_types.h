@@ -210,6 +210,13 @@
   #define FUNC_ATTR_ALWAYS_INLINE
 #endif
 
+/* printf format check attributes */
+#if defined(__clang__) || defined(__GNUC__)
+#define R_PRINTF_CHECK(fmt, dots) __attribute__ ((format (printf, fmt, dots)))
+#else
+#define R_PRINTF_CHECK(fmt, dots)
+#endif
+
 #include <r_types_base.h>
 
 #undef _FILE_OFFSET_BITS
@@ -418,6 +425,8 @@ static inline void *r_new_copy(int size, void *data) {
 #define LDBLFMT "Lf"
 #define HHXFMT  "hhx"
 #endif
+
+#define PFMTDPTR "td"
 
 #define PFMT32x "x"
 #define PFMT32d "d"

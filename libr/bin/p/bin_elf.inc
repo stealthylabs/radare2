@@ -149,6 +149,28 @@ static RBinAddr* binsym(RBinFile *bf, int sym) {
 	return ret;
 }
 
+static bool is_wordable_section(const char *name) {
+	if (!strcmp (name, ".init_array")) {
+		return true;
+	}
+	if (!strcmp (name, ".fini_array")) {
+		return true;
+	}
+	if (!strcmp (name, ".data.rel.ro")) {
+		return true;
+	}
+	if (!strcmp (name, ".dynamic")) {
+		return true;
+	}
+	if (!strcmp (name, ".got")) {
+		return true;
+	}
+	if (strstr (name, ".rela.")) {
+		return true;
+	}
+	return false;
+}
+
 static RList* sections(RBinFile *bf) {
 	struct Elf_(r_bin_elf_obj_t)* obj = (bf && bf->o)? bf->o->bin_obj : NULL;
 	struct r_bin_elf_section_t *section = NULL;
@@ -174,20 +196,9 @@ static RList* sections(RBinFile *bf) {
 			} else if (!strcmp (ptr->name, "C")) {
 				ptr->is_data = true;
 			}
-			if (strstr (ptr->name, ".got")) {
-#if R_BIN_ELF64
-				int wordsize = 8;
-#else
-				int wordsize = 4;
-#endif
-				ptr->format = r_str_newf ("Cd %d[%"PFMT64d"]", wordsize, section[i].size / wordsize);
-			} else if (strstr (ptr->name, ".rela.")) {
-#if R_BIN_ELF64
-				int wordsize = 8;
-#else
-				int wordsize = 4;
-#endif
-				ptr->format = r_str_newf ("Cd %d[%"PFMT64d"]", wordsize, section[i].size / wordsize);
+			if (is_wordable_section (ptr->name)) {
+				ptr->format = r_str_newf ("Cd %d[%"PFMT64d"]",
+					R_BIN_ELF_WORDSIZE, section[i].size / R_BIN_ELF_WORDSIZE);
 			}
 			ptr->size = section[i].type != SHT_NOBITS ? section[i].size : 0;
 			ptr->vsize = section[i].size;
@@ -735,6 +746,16 @@ static void _patch_reloc(ut16 e_machine, RIOBind *iob, RBinElfReloc *rel, ut64 S
 	ut64 A = rel->addend, P = rel->rva;
 	ut8 buf[8];
 	switch (e_machine) {
+	case EM_ARM:
+		val = S + A;
+		r_write_le32 (buf, val);
+		iob->write_at (iob->io, rel->rva, buf, 4);
+		break;
+	case EM_AARCH64:
+		val = S + A;
+		r_write_le64 (buf, val);
+		iob->write_at (iob->io, rel->rva, buf, 8);
+		break;
 	case EM_PPC64: {
 		int low = 0, word = 0;
 		switch (rel->type) {
@@ -889,20 +910,15 @@ static RList* patch_relocs(RBin *b) {
 	   	return NULL;
 	}
 	struct Elf_(r_bin_elf_obj_t) *bin = obj->bin_obj;
-	if (bin->ehdr.e_type != ET_REL) {
+	info = obj ? obj->info: NULL;
+	size_t cdsz = info? (info->bits == 64? 8: info->bits == 32? 4: info->bits == 16 ? 4: 0): 0;
+	if (bin->ehdr.e_type != ET_REL && bin->ehdr.e_type != ET_DYN) {
 		return NULL;
 	}
-	size = bin->g_reloc_num * 4;
+	size = bin->g_reloc_num * cdsz;
 	if (size == 0) {
 		return NULL;
 	}
-	if (!io->cached) {
-	   	eprintf ("Warning: run r2 with -e io.cache=true to fix relocations in disassembly\n");
-		return relocs (r_bin_cur (b));
-	}
-
-	info = obj ? obj->info: NULL;
-	size_t cdsz = info? (info->bits == 64? 8: info->bits == 32? 4: info->bits == 16 ? 4: 0): 0;
 
 	void **it;
 	r_pvector_foreach (&io->maps, it) {
@@ -915,15 +931,20 @@ static RList* patch_relocs(RBin *b) {
 	if (!g) {
 		return NULL;
 	}
+	if (!io->cached) {
+		eprintf ("Warning: run r2 with -e io.cache=true to fix relocations in disassembly\n");
+		return NULL;
+	}
 	ut64 n_vaddr = g->itv.addr + g->itv.size;
 	// reserve at least that space
-	size = bin->g_reloc_num * 4;
+	size = bin->g_reloc_num * cdsz;
 	char *muri = r_str_newf ("malloc://%" PFMT64u, size);
 	RIODesc *gotr2desc = b->iob.open_at (io, muri, R_PERM_R, 0664, n_vaddr);
 	free (muri);
 	if (!gotr2desc) {
 		return NULL;
 	}
+
 
 	RIOMap *gotr2map = b->iob.map_get (io, n_vaddr);
 	if (!gotr2map) {
@@ -946,16 +967,22 @@ static RList* patch_relocs(RBin *b) {
 	size_t i;
 	for (i = 0; !relcs[i].last; i++) {
 		ut64 sym_addr = 0;
+		ut64 plt_entry_addr = vaddr;
 
 		if (relcs[i].sym) {
 			if (relcs[i].sym < bin->imports_by_ord_size && bin->imports_by_ord[relcs[i].sym]) {
-				sym_addr = ht_uu_find (relocs_by_sym, relcs[i].sym, NULL);
+				bool found;
+				sym_addr = ht_uu_find (relocs_by_sym, relcs[i].sym, &found);
+				if (found) {
+					plt_entry_addr = sym_addr;
+				}
 			} else if (relcs[i].sym < bin->symbols_by_ord_size && bin->symbols_by_ord[relcs[i].sym]) {
 				sym_addr = bin->symbols_by_ord[relcs[i].sym]->vaddr;
+				plt_entry_addr = sym_addr;
 			}
 		}
 		// TODO relocation types B, L
-		_patch_reloc (bin->ehdr.e_machine, &b->iob, &relcs[i], sym_addr? sym_addr: vaddr, 0, n_vaddr);
+		_patch_reloc (bin->ehdr.e_machine, &b->iob, &relcs[i], sym_addr? sym_addr: vaddr, 0, plt_entry_addr);
 		if (!(ptr = reloc_convert (bin, &relcs[i], n_vaddr))) {
 			continue;
 		}
@@ -1098,6 +1125,14 @@ static RBinInfo* info(RBinFile *bf) {
 		return NULL;
 	}
 	ret->arch = str;
+	
+	if ((str = Elf_(r_bin_elf_get_cpu) (obj))) {
+		ret->cpu = str;         
+	}
+	if ((str = Elf_(r_bin_elf_get_abi) (obj))) {
+		ret->features = str;
+	}
+	
 	ret->rclass = strdup ("elf");
 	ret->bits = Elf_(r_bin_elf_get_bits) (obj);
 	if (!strcmp (ret->arch, "avr")) {

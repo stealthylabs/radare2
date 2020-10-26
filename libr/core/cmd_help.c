@@ -117,6 +117,20 @@ static const char *help_msg_root[] = {
 	NULL
 };
 
+static const char *help_msg_question_e[] = {
+	"Usage: ?e[=bdgnpst] arg", "print/echo things", "",
+	"?e", "", "echo message with newline",
+	"?e=", " 32", "progress bar at 32 percentage",
+	"?eb", " 10 20 30", "proportional segments bar",
+	"?ed", " 1", "draw a 3D ascii donut at the given animation frame",
+	"?eg", " 10 20", "move cursor to column 10, row 20",
+	"?en", " nonl", "echo message without ending newline",
+	"?ep", " 10 20 30", "draw a pie char with given portion sizes",
+	"?es", " msg", "speak message using the text-to-speech program (e cfg.tts)",
+	"?et", " msg", "change terminal title",
+	NULL
+};
+
 static const char *help_msg_question[] = {
 	"Usage: ?[?[?]] expression", "", "",
 	"?", " eip-0x804800", "show all representation result for this math expr",
@@ -127,6 +141,7 @@ static const char *help_msg_question[] = {
 	"?+", " [cmd]", "run cmd if $? > 0",
 	"?-", " [cmd]", "run cmd if $? < 0",
 	"?=", " eip-0x804800", "hex and dec result for this math expr",
+	"?==", " x86 `e asm.arch`", "strcmp two strings",
 	"??", " [cmd]", "run cmd if $? != 0",
 	"??", "", "show value of operation",
 	"?_", " hudfile", "load hud menu with given file",
@@ -135,7 +150,7 @@ static const char *help_msg_question[] = {
 	"?b64[-]", " [str]", "encode/decode in base64",
 	"?btw", " num|expr num|expr num|expr", "returns boolean value of a <= b <= c",
 	"?B", " [elem]", "show range boundaries like 'e?search.in",
-	"?e[nbgc]", " string", "echo string (nonl, gotoxy, column, bars)",
+	"?e", "[=bdgnpst] arg", "echo messages, bars, pie charts and more (see ?e? for details)",
 	"?f", " [num] [str]", "map each bit of the number as flag string index",
 	"?F", "", "flush cons output",
 	"?h", " [str]", "calculate hash for given string",
@@ -144,6 +159,7 @@ static const char *help_msg_question[] = {
 	"?im", " message", "show message centered in screen",
 	"?in", " prompt", "noyes input prompt",
 	"?iy", " prompt", "yesno input prompt",
+	"?ip", " prompt", "path input prompt",
 	"?j", " arg", "same as '? num' but in JSON",
 	"?l", "[q] str", "returns the length of string ('q' for quiet, just set $?)",
 	"?o", " num", "get octal value",
@@ -745,10 +761,26 @@ static int cmd_help(void *data, const char *input) {
 		core->num->value = n; // redundant
 		break;
 	case '=': // "?=" set num->value
-		if (input[1]) {
-			r_num_math (core->num, input+1);
+		if (input[1] == '=') { // ?==
+			if (input[2] == ' ') {
+				char *s = strdup (input + 3);
+				char *e = strchr (s, ' ');
+				if (e) {
+					*e++ = 0;
+					core->num->value = strcmp (s, e);
+				} else {
+					eprintf ("Missing secondary word in expression to compare\n");
+				}
+				free (s);
+			} else {
+				eprintf ("Usage: ?== str1 str2\n");
+			}
 		} else {
-			r_cons_printf ("0x%"PFMT64x"\n", core->num->value);
+			if (input[1]) { // ?=
+				r_num_math (core->num, input+1);
+			} else {
+				r_cons_printf ("0x%"PFMT64x"\n", core->num->value);
+			}
 		}
 		break;
 	case '+': // "?+"
@@ -777,9 +809,8 @@ static int cmd_help(void *data, const char *input) {
 				if (input[1] == '?') {
 					cmd_help_exclamation (core);
 					return 0;
-				} else {
-					return core->num->value = r_core_cmd (core, input+1, 0);
 				}
+				return core->num->value = r_core_cmd (core, input+1, 0);
 			}
 		} else {
 			r_cons_printf ("0x%"PFMT64x"\n", core->num->value);
@@ -889,7 +920,7 @@ static int cmd_help(void *data, const char *input) {
 		} else {
 			for (input++; input[0] == ' '; input++);
 			core->num->value = strlen (input);
-			r_cons_printf ("%d\n", core->num->value);
+			r_cons_printf ("%" PFMT64d "\n", core->num->value);
 		}
 		break;
 	case 'X': // "?X"
@@ -933,6 +964,9 @@ static int cmd_help(void *data, const char *input) {
 		break;
 	case 'e': // "?e" echo
 		switch (input[1]) {
+		case 't': // "?e=t newtitle"
+			r_cons_set_title (r_str_trim_head_ro (input + 2));
+			break;
 		case '=': { // "?e="
 			ut64 pc = r_num_math (core->num, input + 2);
 			r_print_progressbar (core->print, pc, 80);
@@ -1041,15 +1075,7 @@ static int cmd_help(void *data, const char *input) {
 			r_cons_newline ();
 			break;
 		default:
-			eprintf ("Usage: ?e[...]\n");
-			eprintf (" e msg       echo message\n");
-			eprintf (" e= N...     progressbar N percent\n");
-			eprintf (" ed N...     display a donut\n");
-			eprintf (" ep N...     echo pie chart\n");
-			eprintf (" eb N...     echo portions bar\n");
-			eprintf (" en msg      echo without newline\n");
-			eprintf (" eg x y      gotoxy\n");
-			eprintf (" es msg      use text-to-speech technology\n");
+			r_core_cmd_help (core, help_msg_question_e);
 			break;
 		}
 		break;

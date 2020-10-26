@@ -22,6 +22,7 @@ r_util_sources = [
   'file.c',
   'flist.c',
   'graph.c',
+  'graph_drawable.c',
   'hex.c',
   'idpool.c',
   'json_parser.c',
@@ -103,6 +104,7 @@ r_util = library('r_util', r_util_sources,
   dependencies: r_util_deps,
   install: true,
   implicit_include_directories: false,
+  install_rpath: rpath_lib,
   soversion: r2_libversion
 )
 

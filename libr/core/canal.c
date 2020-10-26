@@ -6,6 +6,7 @@
 #include <r_core.h>
 #include <r_bin.h>
 #include <ht_uu.h>
+#include <r_util/r_graph_drawable.h>
 
 #include <string.h>
 
@@ -1538,7 +1539,7 @@ static int core_anal_graph_construct_edges (RCore *core, RAnalFunction *fcn, int
                                         if (is_star) {
                                                 char *from = get_title (bbi->addr);
                                                 char *to = get_title (bbi->fail);
-                                                r_cons_printf ("%age %s %s\n", from, to);
+                                                r_cons_printf ("age %s %s\n", from, to);
                                                 free(from);
                                                 free(to);
                                         } else {
@@ -2280,43 +2281,64 @@ R_API void r_core_anal_coderefs(RCore *core, ut64 addr) {
 	}
 }
 
-R_API void r_core_anal_importxrefs(RCore *core) {
-	RBinInfo *info = r_bin_get_info (core->bin);
-	RBinObject *obj = r_bin_cur_object (core->bin);
-	bool lit = info ? info->has_lit: false;
-	bool va = core->io->va || core->bin->is_debugger;
-
-	RListIter *iter;
-	RBinImport *imp;
-	if (!obj) {
-		return;
-	}
-	r_list_foreach (obj->imports, iter, imp) {
-		ut64 addr = lit ? r_core_bin_impaddr (core->bin, va, imp->name): 0;
-		if (addr) {
-			r_core_anal_codexrefs (core, addr);
-		} else {
-			r_cons_printf ("agn %s\n", imp->name);
-		}
-	}
-}
-
-R_API void r_core_anal_codexrefs(RCore *core, ut64 addr) {
+static void add_single_addr_xrefs(RCore *core, ut64 addr, RGraph *graph) {
+	r_return_if_fail (graph);
 	RFlagItem *f = r_flag_get_at (core->flags, addr, false);
 	char *me = (f && f->offset == addr)
-		? r_str_new (f->name) : r_str_newf ("0x%"PFMT64x, addr);
-	r_cons_printf ("agn %s\n", me);
+		? r_str_new (f->name)
+		: r_str_newf ("0x%" PFMT64x, addr);
+
+	RGraphNode *curr_node = r_graph_add_node_info (graph, me, NULL, addr);
+	R_FREE (me);
+	if (!curr_node) {
+		return;
+	}
 	RListIter *iter;
 	RAnalRef *ref;
 	RList *list = r_anal_xrefs_get (core->anal, addr);
 	r_list_foreach (list, iter, ref) {
 		RFlagItem *item = r_flag_get_i (core->flags, ref->addr);
-		const char *src = item? item->name: sdb_fmt ("0x%08"PFMT64x, ref->addr);
-		r_cons_printf ("agn %s\n", src);
-		r_cons_printf ("age %s %s\n", src, me);
+		char *src = item? r_str_new (item->name): r_str_newf ("0x%08" PFMT64x, ref->addr);
+		RGraphNode *reference_from = r_graph_add_node_info (graph, src, NULL, ref->addr);
+		free (src);
+		r_graph_add_edge (graph, reference_from, curr_node);
 	}
 	r_list_free (list);
-	free (me);
+}
+
+R_API RGraph *r_core_anal_importxrefs(RCore *core) {
+	RBinInfo *info = r_bin_get_info (core->bin);
+	RBinObject *obj = r_bin_cur_object (core->bin);
+	bool lit = info? info->has_lit: false;
+	bool va = core->io->va || core->bin->is_debugger;
+
+	RListIter *iter;
+	RBinImport *imp;
+	if (!obj) {
+		return NULL;
+	}
+	RGraph *graph = r_graph_new ();
+	if (!graph) {
+		return NULL;
+	}
+	r_list_foreach (obj->imports, iter, imp) {
+		ut64 addr = lit ? r_core_bin_impaddr (core->bin, va, imp->name): 0;
+		if (addr) {
+			add_single_addr_xrefs (core, addr, graph);
+		} else {
+			r_graph_add_node_info (graph, imp->name, NULL, 0);
+		}
+	}
+	return graph;
+}
+
+R_API RGraph *r_core_anal_codexrefs(RCore *core, ut64 addr) {
+	RGraph *graph = r_graph_new ();
+	if (!graph) {
+		return NULL;
+	}
+	add_single_addr_xrefs (core, addr, graph);
+	return graph;
 }
 
 static int RAnalRef_cmp(const RAnalRef* ref1, const RAnalRef* ref2) {
@@ -2428,12 +2450,12 @@ repeat:
 		case R_GRAPH_FORMAT_JSON:
 			if (usenames) {
 				r_cons_printf ("%s{\"name\":\"%s\", "
-						"\"size\":%d,\"imports\":[",
+						"\"size\":%" PFMT64u ",\"imports\":[",
 						first ? "," : "", fcni->name,
 						r_anal_function_linear_size (fcni));
 			} else {
 				r_cons_printf ("%s{\"name\":\"0x%08" PFMT64x
-						"\", \"size\":%d,\"imports\":[",
+						"\", \"size\":%" PFMT64u ",\"imports\":[",
 						first ? "," : "", fcni->addr,
 						r_anal_function_linear_size (fcni));
 			}
@@ -2490,7 +2512,7 @@ repeat:
 					r_cons_printf ("%s\"%s\"", first2?",":"", fcnr_name);
 				}
 				else {
-					r_cons_printf ("%s\"0x%08"PFMT64x"\"", first2?",":"", fcnr_name);
+					r_cons_printf ("%s\"0x%08"PFMT64x"\"", first2? ",":"", fcnr->addr);
 				}
 				break;
 			default:
@@ -2539,7 +2561,7 @@ static void fcn_list_bbs(RAnalFunction *fcn) {
 	RListIter *iter;
 
 	r_list_foreach (fcn->bbs, iter, bbi) {
-		r_cons_printf ("afb+ 0x%08" PFMT64x " 0x%08" PFMT64x " %d ",
+		r_cons_printf ("afb+ 0x%08" PFMT64x " 0x%08" PFMT64x " %" PFMT64u " ",
 				   fcn->addr, bbi->addr, bbi->size);
 		r_cons_printf ("0x%08"PFMT64x" ", bbi->jump);
 		r_cons_printf ("0x%08"PFMT64x, bbi->fail);
@@ -3040,7 +3062,7 @@ static int fcn_print_detail(RCore *core, RAnalFunction *fcn) {
 	}
 	r_list_free (refs);
 	/*Saving Function stack frame*/
-	r_cons_printf ("afS %"PFMT64d" @ 0x%"PFMT64x"\n", fcn->maxstack, fcn->addr);
+	r_cons_printf ("afS %d @ 0x%"PFMT64x"\n", fcn->maxstack, fcn->addr);
 	free (name);
 	return 0;
 }
@@ -3071,7 +3093,7 @@ static int fcn_print_legacy(RCore *core, RAnalFunction *fcn) {
 	r_cons_printf ("#\noffset: 0x%08"PFMT64x"\nname: %s\nsize: %"PFMT64u,
 			fcn->addr, name, r_anal_function_linear_size (fcn));
 	r_cons_printf ("\nis-pure: %s", r_str_bool (r_anal_function_purity (fcn)));
-	r_cons_printf ("\nrealsz: %d", r_anal_function_realsize (fcn));
+	r_cons_printf ("\nrealsz: %" PFMT64d, r_anal_function_realsize (fcn));
 	r_cons_printf ("\nstackframe: %d", fcn->maxstack);
 	if (fcn->cc) {
 		r_cons_printf ("\ncall-convention: %s", fcn->cc);
@@ -4994,7 +5016,7 @@ static inline bool get_next_i(IterCtx *ctx, size_t *next_i) {
 			r_list_delete (ctx->bbl, bbit);
 			*next_i = ctx->cur_bb->addr - ctx->start_addr;
 		}
-	} else if (cur_addr > ctx->end_addr) {
+	} else if (cur_addr >= ctx->end_addr) {
 		return false;
 	}
 	return true;

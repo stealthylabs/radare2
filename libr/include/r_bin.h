@@ -209,6 +209,7 @@ typedef struct r_bin_info_t {
 	char *cpu;
 	char *machine;
 	char *head_flag;
+	char *features;
 	char *os;
 	char *subsystem;
 	char *rpath;
@@ -342,6 +343,7 @@ struct r_bin_t {
 	bool use_xtr; // use extract plugins when loading a file?
 	bool use_ldr; // use loader plugins when loading a file?
 	RStrConstPool constpool;
+	bool is_reloc_patched; // used to indicate whether relocations were patched or not
 };
 
 typedef struct r_bin_xtr_metadata_t {
@@ -864,7 +866,6 @@ extern RBinPlugin r_bin_plugin_mbn;
 extern RBinPlugin r_bin_plugin_smd;
 extern RBinPlugin r_bin_plugin_sms;
 extern RBinPlugin r_bin_plugin_psxexe;
-extern RBinPlugin r_bin_plugin_spc700;
 extern RBinPlugin r_bin_plugin_vsf;
 extern RBinPlugin r_bin_plugin_dyldcache;
 extern RBinPlugin r_bin_plugin_xnu_kernelcache;

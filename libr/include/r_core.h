@@ -238,7 +238,7 @@ typedef struct r_core_tasks_t {
 	bool oneshot_running;
 } RCoreTaskScheduler;
 
-typedef struct r_core_t {
+struct r_core_t {
 	RBin *bin;
 	RConfig *config;
 	ut64 offset; // current seek
@@ -309,7 +309,7 @@ typedef struct r_core_t {
 	int incomment;
 	int curtab; // current tab
 	int seltab; // selected tab
-	int cmdremote;
+	char *cmdremote;
 	char *lastsearch;
 	char *cmdfilter;
 	bool break_loop;
@@ -343,7 +343,7 @@ typedef struct r_core_t {
 	int (*r_main_ragg2)(int argc, const char **argv);
 	int (*r_main_rasm2)(int argc, const char **argv);
 	int (*r_main_rax2)(int argc, const char **argv);
-} RCore;
+};
 
 // maybe move into RAnal
 typedef struct r_core_item_t {
@@ -412,7 +412,7 @@ R_API int r_core_cmd0(RCore *core, const char *cmd);
 R_API void r_core_cmd_init(RCore *core);
 R_API int r_core_cmd_pipe(RCore *core, char *radare_cmd, char *shell_cmd);
 R_API char *r_core_cmd_str(RCore *core, const char *cmd);
-R_API char *r_core_cmd_strf(RCore *core, const char *fmt, ...);
+R_API char *r_core_cmd_strf(RCore *core, const char *fmt, ...) R_PRINTF_CHECK(2, 3);
 R_API char *r_core_cmd_str_pipe(RCore *core, const char *cmd);
 R_API int r_core_cmd_file(RCore *core, const char *file);
 R_API int r_core_cmd_lines(RCore *core, const char *lines);
@@ -578,16 +578,16 @@ R_API void r_core_anal_esil(RCore *core, const char *str, const char *addr);
 R_API void r_core_anal_fcn_merge (RCore *core, ut64 addr, ut64 addr2);
 R_API const char *r_core_anal_optype_colorfor(RCore *core, ut64 addr, bool verbose);
 R_API ut64 r_core_anal_address (RCore *core, ut64 addr);
-R_API void r_core_anal_undefine (RCore *core, ut64 off);
-R_API void r_core_anal_hint_print (RAnal* a, ut64 addr, int mode);
-R_API void r_core_anal_hint_list (RAnal *a, int mode);
+R_API void r_core_anal_undefine(RCore *core, ut64 off);
+R_API void r_core_anal_hint_print(RAnal* a, ut64 addr, int mode);
+R_API void r_core_anal_hint_list(RAnal *a, int mode);
 R_API int r_core_anal_search(RCore *core, ut64 from, ut64 to, ut64 ref, int mode);
 R_API int r_core_anal_search_xrefs(RCore *core, ut64 from, ut64 to, int rad);
-R_API int r_core_anal_data (RCore *core, ut64 addr, int count, int depth, int wordsize);
+R_API int r_core_anal_data(RCore *core, ut64 addr, int count, int depth, int wordsize);
 R_API void r_core_anal_datarefs(RCore *core, ut64 addr);
 R_API void r_core_anal_coderefs(RCore *core, ut64 addr);
-R_API void r_core_anal_codexrefs(RCore *core, ut64 addr);
-R_API void r_core_anal_importxrefs(RCore *core);
+R_API RGraph/*<RGraphNodeInfo>*/ *r_core_anal_codexrefs(RCore *core, ut64 addr);
+R_API RGraph/*<RGraphNodeInfo>*/ *r_core_anal_importxrefs(RCore *core);
 R_API void r_core_anal_callgraph(RCore *core, ut64 addr, int fmt);
 R_API int r_core_anal_refs(RCore *core, const char *input);
 R_API void r_core_agraph_print(RCore *core, int use_utf, const char *input);
@@ -617,7 +617,6 @@ R_API RList *r_core_anal_fcn_get_calls (RCore *core, RAnalFunction *fcn); // get
 
 /*tp.c*/
 R_API void r_core_anal_type_match(RCore *core, RAnalFunction *fcn);
-R_API RStrBuf *var_get_constraint(RAnal *a, RAnalFunction *fcn, RAnalVar *var);
 
 /* asm.c */
 #define R_MIDFLAGS_SHOW 1
@@ -632,7 +631,7 @@ typedef struct r_core_asm_hit {
 } RCoreAsmHit;
 
 R_API RBuffer *r_core_syscall (RCore *core, const char *name, const char *args);
-R_API RBuffer *r_core_syscallf (RCore *core, const char *name, const char *fmt, ...);
+R_API RBuffer *r_core_syscallf (RCore *core, const char *name, const char *fmt, ...) R_PRINTF_CHECK(3, 4);
 R_API RCoreAsmHit *r_core_asm_hit_new(void);
 R_API RList *r_core_asm_hit_list_new(void);
 R_API void r_core_asm_hit_free(void *_hit);

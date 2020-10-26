@@ -54,6 +54,7 @@
 #ifdef _MSC_VER
 #include <direct.h>   // to compile chdir in msvc windows
 #include <process.h>  // to compile execv in msvc windows
+#define pid_t int
 #endif
 
 #if EMSCRIPTEN
@@ -278,13 +279,15 @@ static void setASLR(RRunProfile *r, int enabled) {
 	// for osxver>=10.7
 	// "unset the MH_PIE bit in an already linked executable" with --no-pie flag of the script
 	// the right way is to disable the aslr bit in the spawn call
-#elif __FreeBSD__
+#elif __FreeBSD__ || __NetBSD__ || __DragonFly__
 	r_sys_aslr (enabled);
 #else
 	// not supported for this platform
 #endif
 }
 
+#if __APPLE__ && !__POWERPC__
+#else
 #if HAVE_PTY
 static void restore_saved_fd(int saved, bool restore, int fd) {
 	if (saved == -1) {
@@ -381,6 +384,7 @@ static int handle_redirection_proc(const char *cmd, bool in, bool out, bool err)
 	return -1;
 #endif
 }
+#endif
 
 static int handle_redirection(const char *cmd, bool in, bool out, bool err) {
 #if __APPLE__ && !__POWERPC__
@@ -473,7 +477,7 @@ R_API bool r_run_parseline(RRunProfile *p, const char *b) {
 		return 0;
 	}
 	*e++ = 0;
-	if (*e=='$') {
+	if (*e == '$') {
 		must_free = true;
 		e = r_sys_getenv (e);
 	}
@@ -482,6 +486,8 @@ R_API bool r_run_parseline(RRunProfile *p, const char *b) {
 	}
 	if (!strcmp (b, "program")) {
 		p->_args[0] = p->_program = strdup (e);
+	} else if (!strcmp (b, "daemon")) {
+		p->_daemon = true;
 	} else if (!strcmp (b, "system")) {
 		p->_system = strdup (e);
 	} else if (!strcmp (b, "runlib")) {
@@ -626,6 +632,7 @@ R_API const char *r_run_help(void) {
 	"# arg6=@arg.txt\n"
 	"# arg7=@300@ABCD # 300 chars filled with ABCD pattern\n"
 	"# system=r2 -\n"
+	"# daemon=false\n"
 	"# aslr=no\n"
 	"setenv=FOO=BAR\n"
 	"# unsetenv=FOO\n"
@@ -705,6 +712,13 @@ static int redirect_socket_to_stdio(RSocket *sock) {
 
 	return 0;
 }
+
+#if __WINDOWS__
+static RThreadFunctionRet exit_process(RThread *th) {
+	// eprintf ("\nrarun2: Interrupted by timeout\n");
+	exit (0);
+}
+#endif
 
 static int redirect_socket_to_pty(RSocket *sock) {
 #if HAVE_PTY
@@ -792,7 +806,7 @@ R_API int r_run_config_env(RRunProfile *p) {
 #endif
 
 	if (!p->_program && !p->_system && !p->_runlib) {
-		printf ("No program, system or runlib rule defined\n");
+		eprintf ("No program, system or runlib rule defined\n");
 		return 1;
 	}
 	// when IO is redirected to a process, handle them together
@@ -865,11 +879,7 @@ R_API int r_run_config_env(RRunProfile *p) {
 				is_child = true;
 
 				if (p->_dofork && !p->_dodebug) {
-#ifdef _MSC_VER
-					int child_pid = r_sys_fork ();
-#else
 					pid_t child_pid = r_sys_fork ();
-#endif
 					if (child_pid == -1) {
 						eprintf("rarun2: cannot fork\n");
 						r_socket_free (child);
@@ -1041,13 +1051,17 @@ R_API int r_run_config_env(RRunProfile *p) {
 			}
 			sleep (p->_timeout);
 			if (!kill (mypid, 0)) {
-				eprintf ("\nrarun2: Interrupted by timeout\n");
+				// eprintf ("\nrarun2: Interrupted by timeout\n");
 			}
 			kill (mypid, use_signal);
 			exit (0);
 		}
 #else
-		eprintf ("timeout not supported for this platform\n");
+		if (p->_timeout_sig < 1 || p->_timeout_sig == 9) {
+			r_th_new (exit_process, NULL, p->_timeout);
+		} else {
+			eprintf ("timeout with signal not supported for this platform\n");
+		}
 #endif
 	}
 	return 0;
@@ -1111,7 +1125,59 @@ R_API int r_run_start(RRunProfile *p) {
 		if (p->_pid) {
 			eprintf ("PID: Cannot determine pid with 'system' directive. Use 'program'.\n");
 		}
-		exit (r_sys_cmd (p->_system));
+		if (p->_daemon) {
+#if __WINDOWS__
+	//		eprintf ("PID: Cannot determine pid with 'system' directive. Use 'program'.\n");
+#else
+			pid_t child = r_sys_fork ();
+			if (child == -1) {
+				perror ("fork");
+				exit (1);
+			}
+			if (child) {
+				if (p->_pidfile) {
+					char pidstr[32];
+					snprintf (pidstr, sizeof (pidstr), "%d\n", child);
+					r_file_dump (p->_pidfile,
+							(const ut8*)pidstr,
+							strlen (pidstr), 0);
+				}
+				exit (0);
+			}
+			setsid ();
+			if (p->_timeout) {
+#if __UNIX__
+				int mypid = getpid ();
+				if (!r_sys_fork ()) {
+					int use_signal = p->_timeout_sig;
+					if (use_signal < 1) {
+						use_signal = SIGKILL;
+					}
+					sleep (p->_timeout);
+					if (!kill (mypid, 0)) {
+						// eprintf ("\nrarun2: Interrupted by timeout\n");
+					}
+					kill (mypid, use_signal);
+					exit (0);
+				}
+#else
+				eprintf ("timeout not supported for this platform\n");
+#endif
+			}
+#endif
+#if __UNIX__
+			close(0);
+			close(1);
+			exit (execl ("/bin/sh","/bin/sh", "-c", p->_system, NULL));
+#else
+			exit (r_sys_cmd (p->_system));
+#endif
+		} else {
+			if (p->_pidfile) {
+				eprintf ("Warning: pidfile doesnt work with 'system'.\n");
+			}
+			exit (r_sys_cmd (p->_system));
+		}
 	}
 	if (p->_program) {
 		if (!r_file_exists (p->_program)) {
@@ -1158,6 +1224,31 @@ R_API int r_run_start(RRunProfile *p) {
 			}
 #else
 			eprintf ("nice not supported for this platform\n");
+#endif
+		}
+		if (p->_daemon) {
+#if __WINDOWS__
+			eprintf ("PID: Cannot determine pid with 'system' directive. Use 'program'.\n");
+#else
+			pid_t child = r_sys_fork ();
+			if (child == -1) {
+				perror ("fork");
+				exit (1);
+			}
+			if (child) {
+				if (p->_pidfile) {
+					char pidstr[32];
+					snprintf (pidstr, sizeof (pidstr), "%d\n", child);
+					r_file_dump (p->_pidfile,
+							(const ut8*)pidstr,
+							strlen (pidstr), 0);
+					exit (0);
+				}
+			}
+			setsid ();
+#if !LIBC_HAVE_FORK
+		exit (execv (p->_program, (char* const*)p->_args));
+#endif
 #endif
 		}
 // TODO: must be HAVE_EXECVE
@@ -1227,4 +1318,26 @@ R_API int r_run_start(RRunProfile *p) {
 		r_lib_dl_close (addr);
 	}
 	return 0;
+}
+
+R_API char *r_run_get_environ_profile(char **env) {
+	if (!env) {
+		return NULL;
+	}
+	RStrBuf *sb = r_strbuf_new (NULL);
+	while (*env) {
+		char *k = strdup (*env);
+		char *v = strchr (k, '=');
+		if (v) {
+			*v++ = 0;
+			v = r_str_escape_latin1 (v, false, true, true);
+			if (v) {
+				r_strbuf_appendf (sb, "setenv=%s=\"%s\"\n", k, v);
+				free (v);
+			}
+		}
+		free (k);
+		env++;
+	}
+	return r_strbuf_drain (sb);
 }

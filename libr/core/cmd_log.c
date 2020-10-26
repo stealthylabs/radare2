@@ -21,6 +21,7 @@ static const char *help_msg_L[] = {
 	"Lh", "", "list hash plugins (same as ph)",
 	"Li", "", "list bin plugins (same as iL)",
 	"Lo", "", "list io plugins (same as oL)",
+	"Lp", "", "list parser plugins (e asm.parser=?)",
 	NULL
 };
 
@@ -70,7 +71,7 @@ static void screenlock(RCore *core) {
 	r_cons_clear_buffer ();
 	ut64 begin = r_time_now ();
 	ut64 last = UT64_MAX;
-	ut64 tries = 0;
+	int tries = 0;
 	do {
 		r_cons_clear00 ();
 		r_cons_printf ("Retries: %d\n", tries);
@@ -343,6 +344,9 @@ static int cmd_plugins(void *data, const char *input) {
 		break;
 	case 'a': // "La"
 		r_core_cmd0 (core, "e asm.arch=??");
+		break;
+	case 'p': // "Lp"
+		r_core_cmd0 (core, "e asm.parser=?");
 		break;
 	case 'D': // "LD"
 		if (input[1] == ' ') {

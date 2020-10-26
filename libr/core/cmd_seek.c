@@ -52,6 +52,7 @@ static const char *help_msg_sl[] = {
 	"sl", "[+-][line]", "Seek to relative line",
 	"slc", "", "Clear line cache",
 	"sll", "", "Show total number of lines",
+	"sleep", " [seconds]", "Sleep for an specific amount of time",
 	NULL
 };
 
@@ -447,7 +448,7 @@ static int cmd_seek(void *data, const char *input) {
 			r_config_set_i (core->config, "search.from", core->offset + 1);
 			r_config_set_i (core->config, "search.maxhits", 1);
 			r_core_cmdf (core, "s+1; %s; s-1; s %s%d_0; f-%s%d_0",
-				input, pfx, kwidx, pfx, kwidx, pfx, kwidx);
+				input, pfx, kwidx, pfx, kwidx);
 			r_config_set_i (core->config, "search.from", saved_from);
 			r_config_set_i (core->config, "search.maxhits", saved_maxhits);
 			break;
@@ -751,6 +752,18 @@ static int cmd_seek(void *data, const char *input) {
 	{
 		int sl_arg = r_num_math (core->num, input + 1);
 		switch (input[1]) {
+		case 'e': // "sleep"
+			{
+				const char *arg = strchr (input, ' ');
+				if (arg) {
+					void *bed = r_cons_sleep_begin ();
+					r_sys_sleep (atoi (arg + 1));
+					r_cons_sleep_end (bed);
+				} else {
+					eprintf ("Usage: sleep [seconds]\n");
+				}
+			}
+			break;
 		case '\0': // "sl"
 			if (!core->print->lines_cache) {
 				__init_seek_line (core);

@@ -2,8 +2,8 @@
 
 #include <r_anal.h>
 #include <r_lib.h>
-#include <capstone/capstone.h>
-#include <capstone/systemz.h>
+#include <capstone.h>
+#include <systemz.h>
 // instruction set: http://www.tachyonsoft.com/inst390m.htm
 
 #if CS_API_MAJOR < 2
@@ -32,7 +32,7 @@ static void opex(RStrBuf *buf, csh handle, cs_insn *insn) {
 			break;
 		case SYSZ_OP_IMM:
 			r_strbuf_append (buf, "\"type\":\"imm\"");
-			r_strbuf_appendf (buf, ",\"value\":%"PFMT64d, op->imm);
+			r_strbuf_appendf (buf, ",\"value\":%" PFMT64d, (st64)op->imm);
 			break;
 		case SYSZ_OP_MEM:
 			r_strbuf_append (buf, "\"type\":\"mem\"");

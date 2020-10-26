@@ -350,6 +350,7 @@ static int pdb_read_root(RPdb *pdb) {
 		page = (SPage *) r_list_iter_get (it);
 		if (page->stream_pages == 0) {
 			//eprintf ("Warning: no stream pages. Skipping.\n");
+			r_list_append (pList, NULL);
 			i++;
 			continue;
 		}
@@ -485,6 +486,9 @@ static bool pdb7_parse(RPdb *pdb) {
 	}
 	p_tmp = root_page_data;
 	for (i = 0; i < num_root_index_pages; i++) {
+		if (UT64_MUL_OVFCHK (root_index_pages[i], page_size)) {
+			break;
+		}
 		r_buf_seek (pdb->buf, root_index_pages[i] * page_size,
 			   R_BUF_SET);
 		r_buf_read (pdb->buf, p_tmp, page_size);
@@ -850,7 +854,7 @@ static int build_member_format(STypeInfo *type_info, RStrBuf *format, RStrBuf *n
 		}
 		snprintf (tmp_format, 5, "p%d", size);
 		member_format = tmp_format;
-		r_strbuf_appendf (names, name);
+		r_strbuf_append (names, name);
 	} break;
 	case eLF_CLASS:
 	case eLF_UNION:
@@ -897,7 +901,7 @@ static int build_member_format(STypeInfo *type_info, RStrBuf *format, RStrBuf *n
 		r_warn_if_reached (); // Unhandled type format
 		goto error;
 	}
-	r_strbuf_appendf (format, "%s", member_format);
+	r_strbuf_append (format, member_format);
 skip: // shortcut for unknown types where we only skip the bytes
 	free (name);
 	return 0;

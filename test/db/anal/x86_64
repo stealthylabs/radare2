@@ -53,8 +53,8 @@ s main+98
 pd 3
 EOF
 EXPECT=<<EOF
-0x000048f4 0x00004901 01:2A12 13 j 0x000045b1 f 0x00004901
-0x00004901 0x0000491a 01:2A13 25 j 0x000045ba f 0x0000491a
+0x000048f4 0x00004901 00:0000 13 j 0x000045b1 f 0x00004901
+0x00004901 0x0000491a 00:0000 25 j 0x000045ba f 0x0000491a
 
 |           0x000039c2      mov dword [0x0021f558], 2                  ; [0x21f558:4]=1
 |           0x000039cc      call fcn.00015960
@@ -505,6 +505,13 @@ e asm.comments=false
 e asm.var=false
 aac
 pdr @ 0x00487350
+s 0x0040f710
+afvx
+aei
+aeim
+dr rsi=0x1111111111111111
+11ds
+afvd
 EOF
 EXPECT=<<EOF
 / 114: fcn.00487350 ();
@@ -538,6 +545,26 @@ EXPECT=<<EOF
 | 0x004873c0      400fb6f6       movzx esi, sil
 \ 0x004873c4      e937f1ffff     jmp fcn.00486500
 | ----------- true: 0x00486500
+afvR
+var_bp_38h  0x40f790,0x40f839
+   var_28h  0x40f7c1
+var_bp_30h  0x40f78c,0x40f835
+   var_3ch  0x40f86e
+var_bp_20h  0x40f7d4
+    var_fh  0x40f7a6
+afvW
+var_bp_38h  0x40f728
+   var_28h  0x40f735
+var_bp_30h  0x40f79b,0x40f843
+   var_3ch  0x40f866
+var_bp_20h
+    var_fh
+var var_bp_38h = 0x00177fc0 = (qword)0x1111111111111111
+var var_28h = 0x00177fd0 = (qword)0x0000000000000000
+var var_bp_30h = 0x00177fc8 = (qword)0x0000000000000000
+var var_3ch = 0x00177fbc = (qword)0x1111111100000000
+var var_bp_20h = 0x00177fd8 = (qword)0x0000000000000000
+var var_fh = 0x00177fc7 = (qword)0x0000000000000011
 EOF
 RUN
 
@@ -999,7 +1026,8 @@ ahe test
 ao~esil
 EOF
 EXPECT=<<EOF
-17
+18
+esilcost: 0
 esil: test
 EOF
 RUN
@@ -1011,6 +1039,7 @@ ahe test
 ao~^esil
 EOF
 EXPECT=<<EOF
+esilcost: 0
 esil: test
 EOF
 RUN
@@ -1570,8 +1599,8 @@ EXPECT=<<EOF
 var int64_t var_14h @ rbp-0x14
 var int64_t var_10h @ rbp-0x10
 var int64_t var_8h @ rbp-0x8
-arg int64_t arg1 @ rdi
 arg int64_t arg2 @ rsi
+arg int64_t arg1 @ rdi
 EOF
 RUN
 
@@ -2190,6 +2219,7 @@ EXPECT=<<EOF
     "bytes": "669c",
     "size": 2,
     "type": "upush",
+    "esilcost": 24,
     "scale": 0,
     "refptr": 0,
     "cycles": 2,
@@ -2949,6 +2979,7 @@ EOF
 EXPECT=<<EOF
 address: 0x0
 opcode: push rbp
+esilcost: 24
 disasm: push rbp
 pseudo: push rbp
 mnemonic: push
@@ -3208,19 +3239,19 @@ c 0x5f8 case.0x59d.9
 c 0x606 case.0x59d.11
 c 0x614 case.0x59d.12
 c 0x622 case.0x59d.0
-0x00000580 0x0000058d 01:0090 13 j 0x00000622 f 0x0000058d
-0x0000058d 0x0000059f 01:0092 18 s 0x00000622 s 0x000005b2 s 0x000005c0 s 0x000005ce s 0x000005dc s 0x000005ea s 0x000005f8 s 0x00000606 s 0x00000614 s 0x0000059f
-0x0000059f 0x000005ab 01:0096 12 j 0x000005ab
-0x000005ab 0x000005b2 01:0097 7
-0x000005b2 0x000005c0 01:0099 14 j 0x000005ab
-0x000005c0 0x000005ce 01:009A 14 j 0x000005ab
-0x000005ce 0x000005dc 01:009B 14 j 0x000005ab
-0x000005dc 0x000005ea 01:009C 14 j 0x000005ab
-0x000005ea 0x000005f8 01:009D 14 j 0x000005ab
-0x000005f8 0x00000606 01:009E 14 j 0x000005ab
-0x00000606 0x00000614 01:009F 14 j 0x000005ab
-0x00000614 0x00000622 01:00A0 14 j 0x000005ab
-0x00000622 0x00000633 01:00A1 17 j 0x000005ab
+0x00000580 0x0000058d 00:0000 13 j 0x00000622 f 0x0000058d
+0x0000058d 0x0000059f 00:0000 18 s 0x00000622 s 0x000005b2 s 0x000005c0 s 0x000005ce s 0x000005dc s 0x000005ea s 0x000005f8 s 0x00000606 s 0x00000614 s 0x0000059f
+0x0000059f 0x000005ab 00:0000 12 j 0x000005ab
+0x000005ab 0x000005b2 00:0000 7
+0x000005b2 0x000005c0 00:0000 14 j 0x000005ab
+0x000005c0 0x000005ce 00:0000 14 j 0x000005ab
+0x000005ce 0x000005dc 00:0000 14 j 0x000005ab
+0x000005dc 0x000005ea 00:0000 14 j 0x000005ab
+0x000005ea 0x000005f8 00:0000 14 j 0x000005ab
+0x000005f8 0x00000606 00:0000 14 j 0x000005ab
+0x00000606 0x00000614 00:0000 14 j 0x000005ab
+0x00000614 0x00000622 00:0000 14 j 0x000005ab
+0x00000622 0x00000633 00:0000 17 j 0x000005ab
 EOF
 RUN
 
